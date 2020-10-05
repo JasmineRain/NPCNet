@@ -6,9 +6,13 @@ import torch
 import torch.nn.functional as F
 
 
-def get_classification_report(true, pred, labels):
-    report = classification_report(y_true=true.flatten(), y_pred=pred.flatten(), output_dict=True, labels=labels, target_names=['background', 'tumor', 'lympha'])
-    return report
+def get_classification_report(cm):
+    precision = []
+    recall = []
+    for i in range(cm.shape[0]):
+        precision.append(cm[i, i] / cm[:, i].sum())
+        recall.append(cm[i, i] / cm[i, :].sum())
+    return precision, recall
 
 def get_confusion_matrix(true, pred, labels):
     true = true.flatten()
@@ -94,9 +98,9 @@ def semantic_to_mask(mask, labels):
 
 if __name__ == "__main__":
 
-    pred = np.array([0, 0, 1, 1, 2, 2])
-    label = np.array([0, 1, 1, 2, 2, 0])
+    pred = np.array([0, 0, 0, 1, 1, 2, 2, 1, 0, 2, 3, 2])
+    label = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3])
+    cm = get_confusion_matrix(label, pred, labels=[0, 1, 2, 3])
+    print(get_classification_report(cm))
 
-    reports = get_classification_report(label, pred, labels=[0, 1, 2])
-    print(reports)
 

@@ -126,7 +126,6 @@ def train_val(config):
                 pred = pred.cpu().detach().numpy()
                 mask = semantic_to_mask(mask, labels)
                 pred = semantic_to_mask(pred, labels)
-                reports = get_classification_report(mask, pred, labels=labels)
                 cm += get_confusion_matrix(mask, pred, labels)
                 val_pbar.update(image.shape[0])
                 if locker == 25:
@@ -139,7 +138,11 @@ def train_val(config):
                 # break
             miou = get_miou(cm)
             scheduler.step(miou[1] + miou[2])
-
+            precision, recall = get_classification_report(cm)
+            writer.add_scalar('precision_tumor/val', precision[1], epoch + 1)
+            writer.add_scalar('precision_lympha/val', precision[2], epoch + 1)
+            writer.add_scalar('recall_tumor/val', recall[1], epoch + 1)
+            writer.add_scalar('recall_lympha/val', recall[2], epoch + 1)
             if (miou[1] + miou[2]) / 2 > max_miou:
                 if torch.__version__ == "1.6.0":
                     torch.save(model,
