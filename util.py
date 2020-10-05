@@ -1,10 +1,14 @@
 import numpy as np
 from PIL import Image
 import os
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, classification_report
 import torch
 import torch.nn.functional as F
 
+
+def get_classification_report(true, pred, labels):
+    report = classification_report(y_true=true.flatten(), y_pred=pred.flatten(), output_dict=True, labels=labels, target_names=['background', 'tumor', 'lympha'])
+    return report
 
 def get_confusion_matrix(true, pred, labels):
     true = true.flatten()
@@ -89,17 +93,10 @@ def semantic_to_mask(mask, labels):
 
 
 if __name__ == "__main__":
-    # generate_label()
-    # pred = np.array([[100, 200, 300],
-    #                  [400, 500, 600],
-    #                  [100, 100, 100]])
-    #
-    label = np.array([[100, 200, 300],
-                      [400, 500, 600],
-                      [700, 800, 100]])
 
-    # print(label.fill(0))
-    # print(label)
-    results = mask_to_semantic(label, smooth=True)
-    print(results[:, 2, 1])
+    pred = np.array([0, 0, 1, 1, 2, 2])
+    label = np.array([0, 1, 1, 2, 2, 0])
+
+    reports = get_classification_report(label, pred, labels=[0, 1, 2])
+    print(reports)
 

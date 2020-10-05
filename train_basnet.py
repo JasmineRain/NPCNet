@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 import os
-from util import semantic_to_mask, mask_to_semantic, get_confusion_matrix, get_miou
+from util import semantic_to_mask, mask_to_semantic, get_confusion_matrix, get_miou, get_classification_report
 import torch.nn.functional as F
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0, 2, 5, 6'
@@ -127,6 +127,7 @@ def train_val(config):
                 pred = pred.cpu().detach().numpy()
                 mask = semantic_to_mask(mask, labels)
                 pred = semantic_to_mask(pred, labels)
+                reports = get_classification_report(mask, pred, labels=labels)
                 cm += get_confusion_matrix(mask, pred, labels)
                 val_pbar.update(image.shape[0])
                 if locker == 25:
