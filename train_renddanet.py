@@ -187,12 +187,12 @@ if __name__ == '__main__':
     parser.add_argument('--iscontinue', type=str, default=False, help='true/false')
     parser.add_argument('--smooth', type=str, default=False, help='true/false')
 
-    parser.add_argument('--train_img_dir', type=str, default="../data/PCL/train/image")
-    parser.add_argument('--train_mask_dir', type=str, default="../data/PCL/train/mask")
-    parser.add_argument('--val_img_dir', type=str, default="../data/PCL/val/image")
-    parser.add_argument('--val_mask_dir', type=str, default="../data/PCL/val/mask")
-    parser.add_argument('--num_train', type=int, default=90000, help="4800/1600")
-    parser.add_argument('--num_val', type=int, default=10000, help="1200/400")
+    parser.add_argument('--train_img_dir', type=str, default="../data/NPC20_V1/train/image")
+    parser.add_argument('--train_mask_dir', type=str, default="../data/NPC20_V1/train/mask")
+    parser.add_argument('--val_img_dir', type=str, default="../data/NPC20_V1/val/image")
+    parser.add_argument('--val_mask_dir', type=str, default="../data/NPC20_V1/val/mask")
+    parser.add_argument('--num_train', type=int, default=7300, help="4800/1600")
+    parser.add_argument('--num_val', type=int, default=1824, help="1200/400")
     parser.add_argument('--model_path', type=str, default='./model')
     parser.add_argument('--result_path', type=str, default='./exp')
 
