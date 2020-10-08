@@ -80,7 +80,9 @@ class ToTensor(object):
 
         for i in range(image.shape[2]):
             image[:, :, i] = (image[:, :, i] - np.min(image[:, :, i])) / (np.max(image[:, :, i]) - np.min(image[:, :, i]))
-        image = torch.from_numpy(image.transpose((2, 0, 1)))
+
+        # print(image.shape, image.dtype)
+        image = torch.from_numpy(image.transpose((2, 0, 1)).copy())
 
         # mask transform to semantic
         mask = torch.from_numpy(mask_to_semantic(mask, labels, smooth=smooth))

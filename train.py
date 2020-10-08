@@ -4,7 +4,7 @@ import os
 from util import semantic_to_mask, mask_to_semantic, get_confusion_matrix, get_miou, get_classification_report
 import torch.nn.functional as F
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1, 3'
 import torch
 import torch.nn as nn
 from torch.optim import SGD, lr_scheduler, adamw
@@ -96,6 +96,7 @@ def train_val(config):
     # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15, eta_min=1e-6)
 
     global_step = 0
+    max_miou = 0
     for epoch in range(config.num_epochs):
         epoch_loss = 0.0
         cm = np.zeros([3, 3])
@@ -161,7 +162,7 @@ def train_val(config):
             writer.add_scalar('precision_lympha/val', precision[2], epoch + 1)
             writer.add_scalar('recall_tumor/val', recall[1], epoch + 1)
             writer.add_scalar('recall_lympha/val', recall[2], epoch + 1)
-            if (miou[1] + miou[2]) / 2 > max_fwiou:
+            if (miou[1] + miou[2]) / 2 > max_miou:
                 if torch.__version__ == "1.6.0":
                     torch.save(model,
                                config.result_path + "/%d_%s_%.4f.pth" % (epoch + 1, config.model_type, (miou[1] + miou[2]) / 2),
@@ -169,11 +170,10 @@ def train_val(config):
                 else:
                     torch.save(model,
                                config.result_path + "/%d_%s_%.4f.pth" % (epoch + 1, config.model_type, (miou[1] + miou[2]) / 2))
-                max_fwiou = (miou[1] + miou[2]) / 2
+                max_miou = (miou[1] + miou[2]) / 2
             print("\n")
             print(miou)
-            print("testing epoch loss: " + str(val_loss), "Foreground mIoU = %.4f" % (miou[1] + miou[2]) / 2)
-            writer.add_scalar('mIoU/val', (miou[1] + miou[2]) / 2, epoch + 1)
+            print("testing epoch loss: " + str(val_loss), "Foreground mIoU = %.4f" % ((miou[1] + miou[2]) / 2))
             writer.add_scalar('Foreground mIoU/val', (miou[1] + miou[2]) / 2, epoch + 1)
             writer.add_scalar('loss/val', val_loss, epoch + 1)
             for idx, name in enumerate(objects):
@@ -192,7 +192,7 @@ if __name__ == '__main__':
     parser.add_argument('--img_ch', type=int, default=3)
     parser.add_argument('--output_ch', type=int, default=3)
     parser.add_argument('--num_epochs', type=int, default=1000)
-    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--lr', type=float, default=1e-2)
     parser.add_argument('--model_type', type=str, default='UNet', help='UNet/UNet++/RefineNet')

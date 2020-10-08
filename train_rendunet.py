@@ -154,8 +154,7 @@ def train_val(config):
                 max_miou = (miou[1] + miou[2]) / 2
             print("\n")
             print(miou)
-            print("testing epoch loss: " + str(val_loss), "Foreground mIoU = %.4f" % (miou[1] + miou[2]) / 2)
-            writer.add_scalar('mIoU/val', miou.mean(), epoch + 1)
+            print("testing epoch loss: " + str(val_loss), "Foreground mIoU = %.4f" % ((miou[1] + miou[2]) / 2))
             writer.add_scalar('Foreground mIoU/val', (miou[1] + miou[2]) / 2, epoch + 1)
             writer.add_scalar('loss/val', val_loss, epoch + 1)
             for idx, name in enumerate(objects):
