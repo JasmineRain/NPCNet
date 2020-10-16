@@ -50,25 +50,25 @@ class RefUnet(nn.Module):
 
         self.conv0 = nn.Conv2d(in_ch, inc_ch, 3, padding=1)
 
-        self.conv1 = nn.Conv2d(inc_ch, 64, 3, padding=1)
+        self.conv1 = nn.Conv2d(inc_ch, 64, 3, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu1 = nn.ReLU(inplace=True)
 
         self.pool1 = nn.MaxPool2d(2, 2, ceil_mode=True)
 
-        self.conv2 = nn.Conv2d(64, 64, 3, padding=1)
+        self.conv2 = nn.Conv2d(64, 64, 3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(64)
         self.relu2 = nn.ReLU(inplace=True)
 
         self.pool2 = nn.MaxPool2d(2, 2, ceil_mode=True)
 
-        self.conv3 = nn.Conv2d(64, 64, 3, padding=1)
+        self.conv3 = nn.Conv2d(64, 64, 3, padding=1, bias=False)
         self.bn3 = nn.BatchNorm2d(64)
         self.relu3 = nn.ReLU(inplace=True)
 
         self.pool3 = nn.MaxPool2d(2, 2, ceil_mode=True)
 
-        self.conv4 = nn.Conv2d(64, 64, 3, padding=1)
+        self.conv4 = nn.Conv2d(64, 64, 3, padding=1, bias=False)
         self.bn4 = nn.BatchNorm2d(64)
         self.relu4 = nn.ReLU(inplace=True)
 
@@ -76,31 +76,31 @@ class RefUnet(nn.Module):
 
         #####
 
-        self.conv5 = nn.Conv2d(64, 64, 3, padding=1)
+        self.conv5 = nn.Conv2d(64, 64, 3, padding=1, bias=False)
         self.bn5 = nn.BatchNorm2d(64)
         self.relu5 = nn.ReLU(inplace=True)
 
         #####
 
-        self.conv_d4 = nn.Conv2d(128, 64, 3, padding=1)
+        self.conv_d4 = nn.Conv2d(128, 64, 3, padding=1, bias=False)
         self.bn_d4 = nn.BatchNorm2d(64)
         self.relu_d4 = nn.ReLU(inplace=True)
 
-        self.conv_d3 = nn.Conv2d(128, 64, 3, padding=1)
+        self.conv_d3 = nn.Conv2d(128, 64, 3, padding=1, bias=False)
         self.bn_d3 = nn.BatchNorm2d(64)
         self.relu_d3 = nn.ReLU(inplace=True)
 
-        self.conv_d2 = nn.Conv2d(128, 64, 3, padding=1)
+        self.conv_d2 = nn.Conv2d(128, 64, 3, padding=1, bias=False)
         self.bn_d2 = nn.BatchNorm2d(64)
         self.relu_d2 = nn.ReLU(inplace=True)
 
-        self.conv_d1 = nn.Conv2d(128, 64, 3, padding=1)
+        self.conv_d1 = nn.Conv2d(128, 64, 3, padding=1, bias=False)
         self.bn_d1 = nn.BatchNorm2d(64)
         self.relu_d1 = nn.ReLU(inplace=True)
 
         self.conv_d0 = nn.Conv2d(64, in_ch, 3, padding=1)
 
-        self.upscore2 = nn.Upsample(scale_factor=2, mode='bilinear')
+        self.upscore2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
     def forward(self, x):
         hx = x
@@ -143,7 +143,7 @@ class BASNet(nn.Module):
         super(BASNet, self).__init__()
 
         resnet = models.resnet34(pretrained=False)
-        resnet.load_state_dict(torch.load("./resnet34-333f7ec4.pth"))
+        resnet.load_state_dict(torch.load("./resnet34-333f7ec4.pth", map_location='cpu'))
 
         ## -------------Encoder--------------
 

@@ -36,7 +36,7 @@ def train_val(config):
     elif config.model_type == "SEDANet":
         model = SEDANet()
     elif config.model_type == "RendDANet":
-        model = RendDANet(nclass=8, backbone="resnet101", norm_layer=nn.BatchNorm2d)
+        model = RendDANet(nclass=3, backbone="resnet101", norm_layer=nn.BatchNorm2d)
     elif config.model_type == "RefineNet":
         model = rf101()
     elif config.model_type == "DANet":

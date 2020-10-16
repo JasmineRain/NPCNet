@@ -3,11 +3,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.functional import upsample
-from torch.nn.parallel.data_parallel import DataParallel
-from torch.nn.parallel.parallel_apply import parallel_apply
-from torch.nn.parallel.scatter_gather import scatter
 from torch.nn import Module, Conv2d, Parameter, Softmax
+from resnest.torch import resnest50, resnest101
 
 import dilated as resnet
 from torchvision import models
@@ -99,7 +96,7 @@ class BaseNet(nn.Module):
         elif backbone == 'resnet101':
             self.pretrained = resnet.resnet101(pretrained=False, dilated=dilated, norm_layer=norm_layer)
             if pretrained:
-                self.pretrained.load_state_dict(torch.load("./resnet101-5d3b4d8f.pth"))
+                self.pretrained.load_state_dict(torch.load("./resnet101-5d3b4d8f.pth", map_location='cpu'))
         elif backbone == 'resnet152':
             self.pretrained = resnet.resnet152(pretrained=False, dilated=dilated, norm_layer=norm_layer)
             if pretrained:
@@ -112,6 +109,14 @@ class BaseNet(nn.Module):
             self.pretrained = models.resnext101_32x8d(pretrained=False, progress=True, replace_stride_with_dilation=[0, 1, 1], norm_layer=norm_layer)
             if pretrained:
                 self.pretrained.load_state_dict(torch.load("./resnext101_32x8d-8ba56ff5.pth"))
+        elif backbone == 'resnest50':
+            self.pretrained = resnest50(pretrained=False, dilated=True, norm_layer=norm_layer)
+            if pretrained:
+                self.pretrained.load_state_dict(torch.load("./resnest50-528c19ca.pth"))
+        elif backbone == 'resnest101':
+            self.pretrained = resnest101(pretrained=False, dilated=True, norm_layer=norm_layer)
+            if pretrained:
+                self.pretrained.load_state_dict(torch.load("./resnest101-22405ba7.pth"))
         else:
             self.pretrained = models.resnet101(pretrained=False)
 
@@ -195,6 +200,6 @@ class DANetHead(nn.Module):
 
 
 if __name__ == "__main__":
-    net = DANet(backbone='else', nclass=8)
-    img = torch.rand(1, 3, 256, 256)
+    net = DANet(backbone='resnest101', nclass=3, pretrained=False)
+    img = torch.rand(4, 3, 256, 256)
     net(img)
