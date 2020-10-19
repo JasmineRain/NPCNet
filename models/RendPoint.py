@@ -36,7 +36,7 @@ def sampling_points_v2(mask, N=4, k=3, beta=0.75, training=True):
         return idx, points
 
     over_generation = torch.rand(B, k * N, 2, device=device)
-    over_generation_map = sampling_features(mask, over_generation, align_corners=True)
+    over_generation_map = sampling_features(mask, over_generation, align_corners=False)
 
     temp, _ = torch.sort(over_generation_map, dim=1, descending=True)
     temp = temp.detach()

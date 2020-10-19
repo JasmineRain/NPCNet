@@ -4,7 +4,7 @@ import os
 from util import semantic_to_mask, mask_to_semantic, get_confusion_matrix, get_miou, get_classification_report
 import torch.nn.functional as F
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 2, 5, 6'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
 import torch
 import torch.nn as nn
 from torch.optim import SGD, lr_scheduler, adamw
@@ -24,10 +24,10 @@ def train_val(config):
     train_loader = get_dataloader(img_dir=config.train_img_dir, mask_dir=config.train_mask_dir, mode="train",
                                   batch_size=config.batch_size, num_workers=config.num_workers, smooth=config.smooth)
     val_loader = get_dataloader(img_dir=config.val_img_dir, mask_dir=config.val_mask_dir, mode="val",
-                                batch_size=config.batch_size, num_workers=config.num_workers)
+                                batch_size=2, num_workers=config.num_workers)
 
     writer = SummaryWriter(
-        comment="LR_%f_BS_%d_MODEL_%s_DATA_%s" % (config.lr, config.batch_size, config.model_type, config.data_type))
+        comment="LR_%f_BS_%d_MODEL_%s_DATA" % (config.lr, config.batch_size, config.model_type))
 
     if config.model_type == "UNet":
         model = UNet()
@@ -44,12 +44,12 @@ def train_val(config):
     elif config.model_type == "HRNet_OCR":
         model = seg_hrnet_ocr.get_seg_model()
     elif config.model_type == "RendUNet":
-        model = RendUNet(n_class=config.output_ch, pretrained="resnet50", norm_layer=nn.BatchNorm2d)
+        model = RendUNet(n_class=config.output_ch, pretrained="resnet101", norm_layer=nn.BatchNorm2d)
     else:
         model = UNet()
 
     if config.iscontinue:
-        model = torch.load("./exp/24_Deeplabv3+_0.7825757691389714.pth").module
+        model = torch.load("./exp/9_RendUNet_0.5503.pth").module
 
     for k, m in model.named_modules():
         m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatability
@@ -76,8 +76,8 @@ def train_val(config):
     criterion = MultiRendLoss()
 
     # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[25, 30, 35, 40], gamma=0.5)
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=5, verbose=True)
-    # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15, eta_min=1e-6)
+    # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=5, verbose=True)
+    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15, eta_min=1e-4)
 
     global_step = 0
     max_miou = 0
@@ -105,7 +105,7 @@ def train_val(config):
                 optimizer.step()
                 train_pbar.update(image.shape[0])
                 global_step += 1
-                # if global_step > 10:
+                # if global_step > 3:
                 #     break
 
             # scheduler.step()
@@ -121,23 +121,25 @@ def train_val(config):
                 target = mask.to(device, dtype=torch.long).argmax(dim=1)
                 mask = mask.cpu().numpy()
                 pred = model(image)['fine']
+                # print(pred.shape, pred.dtype)
                 # val_loss += lovasz_softmax(pred, target).item()
                 val_loss += F.cross_entropy(pred, target).item()
                 pred = pred.cpu().detach().numpy()
                 mask = semantic_to_mask(mask, labels)
                 pred = semantic_to_mask(pred, labels)
+                # print(pred.shape, pred.dtype, np.unique(pred), pred[0, :, :].shape)
                 cm += get_confusion_matrix(mask, pred, labels)
                 val_pbar.update(image.shape[0])
                 if locker == 25:
-                    writer.add_images('mask_a/true', mask[2, :, :], epoch + 1, dataformats='HW')
-                    writer.add_images('mask_a/pred', pred[2, :, :], epoch + 1, dataformats='HW')
-                    writer.add_images('mask_b/true', mask[3, :, :], epoch + 1, dataformats='HW')
-                    writer.add_images('mask_b/pred', pred[3, :, :], epoch + 1, dataformats='HW')
+                    writer.add_images('mask_a/true', mask[0, :, :], epoch + 1, dataformats='HW')
+                    writer.add_images('mask_a/pred', pred[0, :, :], epoch + 1, dataformats='HW')
+                    writer.add_images('mask_b/true', mask[1, :, :], epoch + 1, dataformats='HW')
+                    writer.add_images('mask_b/pred', pred[1, :, :], epoch + 1, dataformats='HW')
                 locker += 1
 
                 # break
             miou = get_miou(cm)
-            scheduler.step(miou[1] + miou[2])
+            scheduler.step()
             precision, recall = get_classification_report(cm)
             writer.add_scalar('precision_tumor/val', precision[1], epoch + 1)
             writer.add_scalar('precision_lympha/val', precision[2], epoch + 1)
@@ -171,15 +173,15 @@ if __name__ == '__main__':
 
     # training hyper-parameters
     parser.add_argument('--img_ch', type=int, default=3)
-    parser.add_argument('--output_ch', type=int, default=8)
+    parser.add_argument('--output_ch', type=int, default=3)
     parser.add_argument('--num_epochs', type=int, default=1000)
-    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--lr', type=float, default=1e-2)
     parser.add_argument('--model_type', type=str, default='RendUNet', help='UNet/UNet++/RefineNet')
     parser.add_argument('--loss', type=str, default='ce', help='ce/dice/mix')
     parser.add_argument('--optimizer', type=str, default='sgd', help='sgd/adam/adamw')
-    parser.add_argument('--iscontinue', type=str, default=False, help='true/false')
+    parser.add_argument('--iscontinue', type=str, default=True, help='true/false')
     parser.add_argument('--smooth', type=str, default=False, help='true/false')
 
     parser.add_argument('--train_img_dir', type=str, default="../data/NPC20_V1/train/image")

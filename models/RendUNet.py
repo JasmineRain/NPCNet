@@ -127,10 +127,10 @@ class SegNet(nn.Module):
 
         if pretrained == "resnet50":
             pretrained = models.resnet50(pretrained=False, progress=True, replace_stride_with_dilation=[0, 1, 1], norm_layer=norm_layer)
-            pretrained.load_state_dict(torch.load("./resnet50-19c8e357.pth"))
+            pretrained.load_state_dict(torch.load("./resnet50-19c8e357.pth", map_location='cpu'))
         elif pretrained == "resnet101":
             pretrained = models.resnet101(pretrained=False, progress=True, replace_stride_with_dilation=[0, 1, 1], norm_layer=norm_layer)
-            pretrained.load_state_dict(torch.load("./resnet101-5d3b4d8f.pth"))
+            pretrained.load_state_dict(torch.load("./resnet101-5d3b4d8f.pth", map_location='cpu'))
 
         self.refine = RefineUnit(in_channel=3, out_channel=64, residual=False)
 
@@ -178,11 +178,11 @@ class SegNet(nn.Module):
 class RendNet(nn.Module):
     def __init__(self, n_class):
         super(RendNet, self).__init__()
-        self.mlp3 = MLP(fc_dim_in=1027, fc_dims=[512, 512, 512], num_classes=n_class)
-        self.mlp2 = MLP(fc_dim_in=515, fc_dims=[512, 512, 512], num_classes=n_class)
-        self.mlp1 = MLP(fc_dim_in=259, fc_dims=[512, 512, 512], num_classes=n_class)
-        self.mlp0 = MLP(fc_dim_in=67, fc_dims=[512, 512, 512], num_classes=n_class)
-        self.mlp_refine = MLP(fc_dim_in=67, fc_dims=[512, 512, 512], num_classes=n_class)
+        self.mlp3 = MLP(fc_dim_in=1027, fc_dims=[256, 256, 256], num_classes=n_class)
+        self.mlp2 = MLP(fc_dim_in=515, fc_dims=[256, 256, 256], num_classes=n_class)
+        self.mlp1 = MLP(fc_dim_in=259, fc_dims=[256, 256, 256], num_classes=n_class)
+        self.mlp0 = MLP(fc_dim_in=67, fc_dims=[256, 256, 256], num_classes=n_class)
+        self.mlp_refine = MLP(fc_dim_in=67, fc_dims=[256, 256, 256], num_classes=n_class)
 
     def forward(self, refine, x0, x1, x2, x3, coarse):
         if not self.training:
@@ -191,45 +191,50 @@ class RendNet(nn.Module):
         # coarse size: 48x48
         # rend stage 1 with layer3
         temp1 = coarse
+        # print("temp1 value: ", temp1.max(), temp1.min(), temp1.shape)
         points1 = sampling_points_v2(torch.softmax(temp1, dim=1), N=512, k=3, beta=0.75)
-        coarse_feature = sampling_features(temp1, points1, align_corners=True)
-        fine_feature = sampling_features(x3, points1, align_corners=True)
+        coarse_feature = sampling_features(temp1, points1, align_corners=False)
+        fine_feature = sampling_features(x3, points1, align_corners=False)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend1 = self.mlp3(feature_representation)
 
         # coarse size: 48x48
         # rend stage 2 with layer2
         temp2 = coarse
+        # print("temp2 value: ", temp2.max(), temp2.min(), temp2.shape)
         points2 = sampling_points_v2(torch.softmax(temp2, dim=1), N=512, k=3, beta=0.75)
-        coarse_feature = sampling_features(temp2, points2, align_corners=True)
-        fine_feature = sampling_features(x2, points2, align_corners=True)
+        coarse_feature = sampling_features(temp2, points2, align_corners=False)
+        fine_feature = sampling_features(x2, points2, align_corners=False)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend2 = self.mlp2(feature_representation)
 
         # coarse size: 96x96
         # rend stage 3 with layer1
-        temp3 = F.interpolate(temp2, scale_factor=2, mode='bilinear', align_corners=True)
+        temp3 = F.interpolate(temp2, scale_factor=2, mode='bilinear', align_corners=False)
+        # print("temp3 value: ", temp3.max(), temp3.min(), temp3.shape)
         points3 = sampling_points_v2(torch.softmax(temp3, dim=1), N=2048, k=3, beta=0.75)
-        coarse_feature = sampling_features(temp3, points3, align_corners=True)
-        fine_feature = sampling_features(x1, points3, align_corners=True)
+        coarse_feature = sampling_features(temp3, points3, align_corners=False)
+        fine_feature = sampling_features(x1, points3, align_corners=False)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend3 = self.mlp1(feature_representation)
 
         # coarse size: 192x192
         # rend stage 4 with layer0
-        temp4 = F.interpolate(temp3, scale_factor=2, mode='bilinear', align_corners=True)
+        temp4 = F.interpolate(temp3, scale_factor=2, mode='bilinear', align_corners=False)
+        # print("temp4 value: ", temp4.max(), temp4.min(), temp4.shape)
         points4 = sampling_points_v2(torch.softmax(temp4, dim=1), N=2048, k=3, beta=0.75)
-        coarse_feature = sampling_features(temp4, points4, align_corners=True)
-        fine_feature = sampling_features(x0, points4, align_corners=True)
+        coarse_feature = sampling_features(temp4, points4, align_corners=False)
+        fine_feature = sampling_features(x0, points4, align_corners=False)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend4 = self.mlp0(feature_representation)
 
         # coarse size: 384x384
         # rend stage 5 with layer refined
-        temp5 = F.interpolate(temp4, scale_factor=2, mode='bilinear', align_corners=True)
+        temp5 = F.interpolate(temp4, scale_factor=2, mode='bilinear', align_corners=False)
+        # print("temp5 value: ", temp5.max(), temp5.min(), temp5.shape)
         points5 = sampling_points_v2(torch.softmax(temp5, dim=1), N=2048, k=3, beta=0.75)
-        coarse_feature = sampling_features(temp5, points5, align_corners=True)
-        fine_feature = sampling_features(refine, points5, align_corners=True)
+        coarse_feature = sampling_features(temp5, points5, align_corners=False)
+        fine_feature = sampling_features(refine, points5, align_corners=False)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend5 = self.mlp_refine(feature_representation)
 
@@ -248,8 +253,8 @@ class RendNet(nn.Module):
         # coarse size: 48x48
         temp = coarse
         points_idx, points = sampling_points_v2(torch.softmax(temp, dim=1), 512, training=self.training)
-        coarse_feature = sampling_features(temp, points, align_corners=True)
-        fine_feature = sampling_features(x3, points, align_corners=True)
+        coarse_feature = sampling_features(temp, points, align_corners=False)
+        fine_feature = sampling_features(x3, points, align_corners=False)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend = self.mlp3(feature_representation)
         B, C, H, W = coarse.shape
@@ -323,7 +328,7 @@ class RendNet(nn.Module):
 
 
 class RendUNet(nn.Module):
-    def __init__(self, n_class=3, pretrained="resnet50", norm_layer=nn.BatchNorm2d):
+    def __init__(self, n_class=3, pretrained="resnet101", norm_layer=nn.BatchNorm2d):
         super(RendUNet, self).__init__()
         self.seg = SegNet(pretrained=pretrained, n_class=n_class, norm_layer=norm_layer)
         self.rend = RendNet(n_class=n_class)
@@ -345,9 +350,13 @@ class RendUNet(nn.Module):
 
 if __name__ == "__main__":
     model = RendUNet()
-    img = torch.rand(4, 3, 384, 384)
+    img = torch.rand(4, 3, 512, 512)
+    mask = torch.rand(4, 3, 512, 512)
     model.train()
     print('# parameters:', sum(param.numel() for param in model.parameters()))
     res = model(img)
     for k, v in res.items():
-        print(k, v[0].shape)
+        if k == "coarse":
+            print(k, v.shape)
+        else:
+            print(k, v[0].shape, v[1].shape, sampling_features(mask, v[0]).shape)
