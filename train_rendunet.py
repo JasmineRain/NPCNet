@@ -121,13 +121,10 @@ def train_val(config):
                 target = mask.to(device, dtype=torch.long).argmax(dim=1)
                 mask = mask.cpu().numpy()
                 pred = model(image)['fine']
-                # print(pred.shape, pred.dtype)
-                # val_loss += lovasz_softmax(pred, target).item()
                 val_loss += F.cross_entropy(pred, target).item()
                 pred = pred.cpu().detach().numpy()
                 mask = semantic_to_mask(mask, labels)
                 pred = semantic_to_mask(pred, labels)
-                # print(pred.shape, pred.dtype, np.unique(pred), pred[0, :, :].shape)
                 cm += get_confusion_matrix(mask, pred, labels)
                 val_pbar.update(image.shape[0])
                 if locker == 25:
