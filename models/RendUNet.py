@@ -282,8 +282,8 @@ class RendNet(nn.Module):
         coarse3 = F.interpolate(coarse, scale_factor=2, mode='bilinear', align_corners=False)
         temp = coarse3
         points_idx, points = sampling_points_v2(torch.softmax(temp, dim=1), 512, training=self.training)
-        coarse_feature = sampling_features(temp, points, align_corners=True)
-        fine_feature = sampling_features(x1, points, align_corners=True)
+        coarse_feature = sampling_features(temp, points, align_corners=False)
+        fine_feature = sampling_features(x1, points, align_corners=False)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend = self.mlp1(feature_representation)
         B, C, H, W = coarse3.shape
