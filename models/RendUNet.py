@@ -212,31 +212,37 @@ class RendNet(nn.Module):
         # rend stage 3 with layer1
         temp3 = F.interpolate(coarse, scale_factor=2, mode='bilinear', align_corners=False)
         # print("temp3 value: ", temp3.max(), temp3.min(), temp3.shape)
-        points3 = sampling_points_v2(torch.softmax(temp3, dim=1), N=2048, k=3, beta=0.75)
+        points3 = sampling_points_v2(torch.softmax(temp3, dim=1), N=256, k=60, beta=0.9)
         coarse_feature = sampling_features(temp3, points3, align_corners=False)
         fine_feature = sampling_features(x1, points3, align_corners=False)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend3 = self.mlp1(feature_representation)
+        # print("\n stage 3")
+        # print((temp3.argmax(dim=1) == 0).sum(), (temp3.argmax(dim=1) == 1).sum(), (temp3.argmax(dim=1) == 2).sum())
 
         # coarse size: 192x192
         # rend stage 4 with layer0
         temp4 = F.interpolate(temp3, scale_factor=2, mode='bilinear', align_corners=False)
         # print("temp4 value: ", temp4.max(), temp4.min(), temp4.shape)
-        points4 = sampling_points_v2(torch.softmax(temp4, dim=1), N=2048, k=3, beta=0.75)
+        points4 = sampling_points_v2(torch.softmax(temp4, dim=1), N=1024, k=60, beta=0.9)
         coarse_feature = sampling_features(temp4, points4, align_corners=False)
         fine_feature = sampling_features(x0, points4, align_corners=False)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend4 = self.mlp0(feature_representation)
+        # print("\n stage 4")
+        # print((temp4.argmax(dim=1) == 0).sum(), (temp4.argmax(dim=1) == 1).sum(), (temp4.argmax(dim=1) == 2).sum())
 
         # coarse size: 384x384
         # rend stage 5 with layer refined
         temp5 = F.interpolate(temp4, scale_factor=2, mode='bilinear', align_corners=False)
         # print("temp5 value: ", temp5.max(), temp5.min(), temp5.shape)
-        points5 = sampling_points_v2(torch.softmax(temp5, dim=1), N=2048, k=3, beta=0.75)
+        points5 = sampling_points_v2(torch.softmax(temp5, dim=1), N=4096, k=60, beta=0.9)
         coarse_feature = sampling_features(temp5, points5, align_corners=False)
         fine_feature = sampling_features(refine, points5, align_corners=False)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend5 = self.mlp_refine(feature_representation)
+        # print("\n stage 5")
+        # print((temp5.argmax(dim=1) == 0).sum(), (temp5.argmax(dim=1) == 1).sum(), (temp5.argmax(dim=1) == 2).sum())
 
         return {
             "coarse": coarse,

@@ -49,7 +49,7 @@ def train_val(config):
         model = UNet()
 
     if config.iscontinue:
-        model = torch.load("./exp/9_RendUNet_0.5503.pth").module
+        model = torch.load("./exp/9_RendUNet_0.5966.pth").module
 
     for k, m in model.named_modules():
         m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatability
@@ -77,7 +77,7 @@ def train_val(config):
 
     # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[25, 30, 35, 40], gamma=0.5)
     # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=5, verbose=True)
-    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15, eta_min=1e-4)
+    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=20, eta_min=1e-5)
 
     global_step = 0
     max_miou = 0
@@ -94,10 +94,14 @@ def train_val(config):
                 mask = mask.to(device, dtype=torch.float32)
 
                 pred = model(image)
-                loss = criterion(pred, mask)
+                seg_loss, point_loss3, point_loss4, point_loss5 = criterion(pred, mask)
+                loss = seg_loss + point_loss3 + point_loss4 + point_loss5
                 epoch_loss += loss.item()
-
                 writer.add_scalar('Loss/train', loss.item(), global_step)
+                writer.add_scalar('Loss/seg_loss', seg_loss.item(), global_step)
+                writer.add_scalar('Loss/point_loss3', point_loss3.item(), global_step)
+                writer.add_scalar('Loss/point_loss4', point_loss4.item(), global_step)
+                writer.add_scalar('Loss/point_loss5', point_loss5.item(), global_step)
                 train_pbar.set_postfix(**{'loss (batch)': loss.item()})
 
                 optimizer.zero_grad()
@@ -174,7 +178,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_epochs', type=int, default=1000)
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--num_workers', type=int, default=8)
-    parser.add_argument('--lr', type=float, default=1e-2)
+    parser.add_argument('--lr', type=float, default=5e-3)
     parser.add_argument('--model_type', type=str, default='RendUNet', help='UNet/UNet++/RefineNet')
     parser.add_argument('--loss', type=str, default='ce', help='ce/dice/mix')
     parser.add_argument('--optimizer', type=str, default='sgd', help='sgd/adam/adamw')

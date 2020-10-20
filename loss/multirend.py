@@ -26,17 +26,35 @@ class MultiRendLoss(nn.Module):
         # gt_points2 = sampling_features(mask, stage2[0], mode='nearest', align_corners=False).argmax(dim=1)
         # point_loss2 = F.cross_entropy(rend2, gt_points2)
 
+        weight = torch.tensor([1., 5., 7.]).to(mask.device)
+
         rend3 = stage3[1]
-        gt_points3 = sampling_features(mask, stage3[0], mode='nearest', align_corners=False).argmax(dim=1)
+        gt_points3 = sampling_features(mask, stage3[0], mode='bilinear', align_corners=False).argmax(dim=1)
         point_loss3 = F.cross_entropy(rend3, gt_points3)
 
         rend4 = stage4[1]
-        gt_points4 = sampling_features(mask, stage4[0], mode='nearest', align_corners=False).argmax(dim=1)
+        gt_points4 = sampling_features(mask, stage4[0], mode='bilinear', align_corners=False).argmax(dim=1)
         point_loss4 = F.cross_entropy(rend4, gt_points4)
 
         rend5 = stage5[1]
-        gt_points5 = sampling_features(mask, stage5[0], mode='nearest', align_corners=False).argmax(dim=1)
+        gt_points5 = sampling_features(mask, stage5[0], mode='bilinear', align_corners=False).argmax(dim=1)
         point_loss5 = F.cross_entropy(rend5, gt_points5)
+
+        # print("\n")
+        # print("---gt---")
+        # print(mask.argmax(dim=1).shape, (mask.argmax(dim=1).flatten() == 0).sum(), (mask.argmax(dim=1).flatten() == 1).sum(),
+        #       (mask.argmax(dim=1).flatten() == 2).sum())
+        # print(gt_points3.shape, (gt_points3.flatten() == 0).sum(), (gt_points3.flatten() == 1).sum(),
+        #       (gt_points3.flatten() == 2).sum())
+        # print(gt_points4.shape, (gt_points4.flatten() == 0).sum(), (gt_points4.flatten() == 1).sum(),
+        #       (gt_points4.flatten() == 2).sum())
+        # print(gt_points5.shape, (gt_points5.flatten() == 0).sum(), (gt_points5.flatten() == 1).sum(),
+        #       (gt_points5.flatten() == 2).sum())
+        # print("\n")
+        # print("---rend---")
+        # print(rend3.argmax(dim=1).shape, (rend3.argmax(dim=1).flatten() == 0).sum(), (rend3.argmax(dim=1).flatten() == 1).sum(), (rend3.argmax(dim=1).flatten() == 2).sum())
+        # print(rend4.argmax(dim=1).shape, (rend4.argmax(dim=1).flatten() == 0).sum(), (rend4.argmax(dim=1).flatten() == 1).sum(), (rend4.argmax(dim=1).flatten() == 2).sum())
+        # print(rend5.argmax(dim=1).shape, (rend5.argmax(dim=1).flatten() == 0).sum(), (rend5.argmax(dim=1).flatten() == 1).sum(), (rend5.argmax(dim=1).flatten() == 2).sum())
 
         mask = mask.argmax(dim=1)
         seg_loss = F.cross_entropy(pred0, mask)
@@ -45,4 +63,4 @@ class MultiRendLoss(nn.Module):
 
         loss = point_loss + seg_loss
 
-        return loss
+        return seg_loss, point_loss3, point_loss4, point_loss5
