@@ -34,12 +34,14 @@ class NPCDataset(Dataset):
         mask = np.load(os.path.join(self.mask_dir, self.masks[item]))
 
         if self.mode == "train":
-            seed = np.random.randint(0, 3, 1)
+            seed = np.random.randint(0, 4, 1)
             if seed == 0:
                 pass
             elif seed == 1:
                 image, mask = self.hf(image, mask)
             elif seed == 2:
+                image, mask = self.vf(image, mask)
+            elif seed == 3:
                 image, mask = self.rt(image, mask)
 
             image, mask = self.tt(image, mask, labels=self.labels)
@@ -62,7 +64,7 @@ def get_dataloader(img_dir, mask_dir, batch_size, num_workers, mode="train", smo
 
     if mode == "train":
         train_dataset = NPCDataset(img_dir, mask_dir, mode="train", smooth=False)
-        train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=True)
         return train_dataloader
     elif mode == "test":
         test_dataset = NPCDataset(img_dir, mask_dir, mode='test', smooth=False)

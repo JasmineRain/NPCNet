@@ -36,7 +36,7 @@ config = {
   "MODEL": {
     "NAME": "seg_hrnet_ocr",
     "NUM_OUTPUTS": 2,
-    "PRETRAINED": "./hrnet_ocr_cs_trainval_8227_torch11.pth",
+    "PRETRAINED": "",
     "EXTRA": {
       "FINAL_CONV_KERNEL": 1,
       "STAGE1": {
@@ -724,7 +724,9 @@ class HighResolutionNet(nn.Module):
         out_aux_seg.append(out_aux)
         out_aux_seg.append(out)
 
-        return F.interpolate(out, size=imsize, mode="bilinear", align_corners=True)
+        return out_aux_seg
+
+        # return F.interpolate(out, size=imsize, mode="bilinear", align_corners=True)
 
     def init_weights(self, pretrained='',):
         logger.info('=> init weights from normal distribution')
@@ -777,4 +779,4 @@ if __name__ == "__main__":
     model.eval()
     img = torch.rand(1, 3, 256, 256)
     output = model(img)
-    print(output.shape)
+    print(output[0].shape, output[1].shape)

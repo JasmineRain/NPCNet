@@ -78,8 +78,8 @@ def train_val(config):
     criterion = RendLoss()
 
     # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[25, 30, 35, 40], gamma=0.5)
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=5, verbose=True)
-    # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15, eta_min=1e-6)
+    # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=5, verbose=True)
+    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15, eta_min=1e-4)
 
     global_step = 0
     max_miou = 0
@@ -96,10 +96,12 @@ def train_val(config):
                 mask = mask.to(device, dtype=torch.float32)
 
                 pred = model(image)
-                loss = criterion(pred, mask)
-                # loss = lovasz_softmax(torch.softmax(pred, dim=1), mask)
+                seg_loss, point_loss = criterion(pred, mask)
+                loss = seg_loss + point_loss
                 epoch_loss += loss.item()
 
+                writer.add_scalar('Loss/seg', seg_loss.item(), global_step)
+                writer.add_scalar('Loss/point', point_loss.item(), global_step)
                 writer.add_scalar('Loss/train', loss.item(), global_step)
                 train_pbar.set_postfix(**{'loss (batch)': loss.item()})
 
@@ -124,7 +126,6 @@ def train_val(config):
                 target = mask.to(device, dtype=torch.long).argmax(dim=1)
                 mask = mask.cpu().numpy()
                 pred = model(image)['fine']
-                # val_loss += lovasz_softmax(pred, target).item()
                 val_loss += F.cross_entropy(pred, target).item()
                 pred = pred.cpu().detach().numpy()
                 mask = semantic_to_mask(mask, labels)
@@ -140,7 +141,7 @@ def train_val(config):
 
                 # break
             miou = get_miou(cm)
-            scheduler.step(miou[1] + miou[2])
+            scheduler.step()
             precision, recall = get_classification_report(cm)
             writer.add_scalar('precision_tumor/val', precision[1], epoch + 1)
             writer.add_scalar('precision_lympha/val', precision[2], epoch + 1)
@@ -176,9 +177,9 @@ if __name__ == '__main__':
     parser.add_argument('--img_ch', type=int, default=3)
     parser.add_argument('--output_ch', type=int, default=8)
     parser.add_argument('--num_epochs', type=int, default=1000)
-    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--num_workers', type=int, default=8)
-    parser.add_argument('--lr', type=float, default=1e-2)
+    parser.add_argument('--lr', type=float, default=8e-3)
     parser.add_argument('--model_type', type=str, default='RendDANet', help='UNet/UNet++/RefineNet')
     parser.add_argument('--data_type', type=str, default='multi', help='single/multi')
     parser.add_argument('--loss', type=str, default='ce', help='ce/dice/mix')

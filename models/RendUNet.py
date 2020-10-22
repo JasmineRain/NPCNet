@@ -152,7 +152,7 @@ class SegNet(nn.Module):
         # 2048 24
         self.layer4 = pretrained.layer4
 
-        self.att = ChannelSpatialSELayer(num_channels=2048, reduction_ratio=8)
+        self.att = ChannelSpatialSELayer(num_channels=2048, reduction_ratio=4)
 
         self.seg = nn.Sequential(nn.Dropout2d(0.1, False), nn.Conv2d(2048, n_class, 1))
 

@@ -11,6 +11,68 @@ from utils_Deeplab import SyncBN2d
 __all__ = ["RendDANet"]
 
 
+class ChannelSELayer(nn.Module):
+
+    def __init__(self, num_channels, reduction_ratio=8):
+        super(ChannelSELayer, self).__init__()
+        num_channels_reduced = num_channels // reduction_ratio
+        self.reduction_ratio = reduction_ratio
+        self.fc1 = nn.Linear(num_channels, num_channels_reduced, bias=True)
+        self.fc2 = nn.Linear(num_channels_reduced, num_channels, bias=True)
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, input_tensor):
+        batch_size, num_channels, H, W = input_tensor.size()
+        # Average along each channel
+        squeeze_tensor = input_tensor.view(batch_size, num_channels, -1).mean(dim=2)
+
+        # channel excitation
+        fc_out_1 = self.relu(self.fc1(squeeze_tensor))
+        fc_out_2 = self.sigmoid(self.fc2(fc_out_1))
+
+        a, b = squeeze_tensor.size()
+        output_tensor = torch.mul(input_tensor, fc_out_2.view(a, b, 1, 1))
+        return output_tensor
+
+
+class SpatialSELayer(nn.Module):
+
+    def __init__(self, num_channels):
+
+        super(SpatialSELayer, self).__init__()
+        self.conv = nn.Conv2d(num_channels, 1, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, input_tensor, weights=None):
+
+        batch_size, channel, a, b = input_tensor.size()
+
+        if weights:
+            weights = weights.view(1, channel, 1, 1)
+            out = F.conv2d(input_tensor, weights)
+        else:
+            out = self.conv(input_tensor)
+        squeeze_tensor = self.sigmoid(out)
+
+        # spatial excitation
+        output_tensor = torch.mul(input_tensor, squeeze_tensor.view(batch_size, 1, a, b))
+
+        return output_tensor
+
+
+class ChannelSpatialSELayer(nn.Module):
+
+    def __init__(self, num_channels, reduction_ratio=2):
+        super(ChannelSpatialSELayer, self).__init__()
+        self.cSE = ChannelSELayer(num_channels, reduction_ratio)
+        self.sSE = SpatialSELayer(num_channels)
+
+    def forward(self, input_tensor):
+        output_tensor = torch.max(self.cSE(input_tensor), self.sSE(input_tensor))
+        return output_tensor
+
+
 class PAM_Module(Module):
     """ Position attention module"""
 
@@ -111,7 +173,6 @@ class BaseNet(nn.Module):
         c3 = self.pretrained.layer3(c2)
         c4 = self.pretrained.layer4(c3)
 
-
         return c0, c1, c2, c3, c4
 
 
@@ -155,17 +216,29 @@ class DANetHead(nn.Module):
         return sasc_output
 
 
+# class DANetHead(nn.Module):
+#
+#     def __init__(self, in_channels, out_channels, norm_layer):
+#         super(DANetHead, self).__init__()
+#         self.att = ChannelSpatialSELayer(num_channels=in_channels, reduction_ratio=4)
+#         self.conv = nn.Sequential(nn.Dropout2d(0.1, False), nn.Conv2d(in_channels, out_channels, 1))
+#
+#     def forward(self, x):
+#         x = self.conv(self.att(x))
+#         return x
+
+
 class PointHead(nn.Module):
-    def __init__(self, in_c=515, num_classes=1, k=3, beta=0.75):
+    def __init__(self, in_c=515, num_classes=1, k=50, beta=0.9):
         super(PointHead, self).__init__()
         self.mlp = nn.Sequential(
-            nn.Conv1d(in_channels=in_c, out_channels=512, kernel_size=1, stride=1, padding=0, bias=False),
+            nn.Conv1d(in_channels=in_c, out_channels=256, kernel_size=1, stride=1, padding=0, bias=False),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=512, out_channels=512, kernel_size=1, stride=1, padding=0, bias=False),
+            nn.Conv1d(in_channels=256, out_channels=256, kernel_size=1, stride=1, padding=0, bias=False),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=512, out_channels=512, kernel_size=1, stride=1, padding=0, bias=False),
+            nn.Conv1d(in_channels=256, out_channels=256, kernel_size=1, stride=1, padding=0, bias=False),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=512, out_channels=num_classes, kernel_size=1, stride=1, padding=0)
+            nn.Conv1d(in_channels=256, out_channels=num_classes, kernel_size=1, stride=1, padding=0)
         )
         self.k = k
         self.beta = beta
@@ -175,10 +248,10 @@ class PointHead(nn.Module):
         if not self.training:
             return self.inference(x, feature, mask)
 
-        num_points = 2048
+        num_points = 256
         points = sampling_points_v2(torch.softmax(mask, dim=1), num_points, self.k, self.beta)
-        coarse = sampling_features(mask, points, align_corners=True)
-        fine = sampling_features(feature, points, align_corners=True)
+        coarse = sampling_features(mask, points, align_corners=False)
+        fine = sampling_features(feature, points, align_corners=False)
         feature_representation = torch.cat([coarse, fine], dim=1)
         rend = self.mlp(feature_representation)
 
@@ -187,31 +260,25 @@ class PointHead(nn.Module):
     @torch.no_grad()
     def inference(self, x, feature, mask):
 
-        num_points = 512
+        num_points = 1024
         while mask.shape[-1] != x.shape[-1]:
-            mask = F.interpolate(mask, scale_factor=2, mode="bilinear", align_corners=True)
+            mask = F.interpolate(mask, scale_factor=2, mode="bilinear", align_corners=False)
 
             points_idx, points = sampling_points_v2(torch.softmax(mask, dim=1), num_points, training=self.training)
 
-            coarse = sampling_features(mask, points, align_corners=True)
-            fine = sampling_features(feature, points, align_corners=True)
+            coarse = sampling_features(mask, points, align_corners=False)
+            fine = sampling_features(feature, points, align_corners=False)
 
             feature_representation = torch.cat([coarse, fine], dim=1)
 
             rend = self.mlp(feature_representation)
 
-            #print(rend.min())
-
             B, C, H, W = mask.shape
-
-            #print(mask.shape)
 
             points_idx = points_idx.unsqueeze(1).expand(-1, C, -1)
             mask = (mask.reshape(B, C, -1)
                     .scatter_(2, points_idx, rend)
                     .view(B, C, H, W))
-
-            #print(mask.shape)
 
         return {"fine": mask}
 
@@ -225,7 +292,6 @@ class RendDANet(BaseNet):
 
     def forward(self, x):
         c0, c1, c2, c3, c4 = self.base_forward(x)
-
         mask = self.da_head(c4)
         result = self.rend_head(x, c2, mask)
 
