@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.optim import SGD, lr_scheduler, adamw
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from models import UNetPP, UNet, rf101, DANet, SEDANet, scSEUNet, RendDANet, NewModel, NewModel2, NewModel3, NewModel4, NewModel5,  NewModel6, NewModel7
+from models import UNetPP, UNet, rf101, DANet, SEDANet, scSEUNet, RendDANet, NewModel, NewModel2, NewModel3, NewModel4, NewModel5,  NewModel6, NewModel7, NewModel8
 from loss import LabelSmoothSoftmaxCE, LabelSmoothCE, RendLoss
 from utils_Deeplab import SyncBN2d
 from models.DeepLabV3_plus import deeplabv3_plus
@@ -46,7 +46,7 @@ def train_val(config):
     elif config.model_type == "HRNet_OCR":
         model = seg_hrnet_ocr.get_seg_model()
     elif config.model_type == "NewModel":
-        model = NewModel7(nclass=3, backbone="resnet101", norm_layer=nn.BatchNorm2d, pretrained=True)
+        model = NewModel8(nclass=3, backbone="resnet101", norm_layer=nn.BatchNorm2d, pretrained=True)
     else:
         model = UNet()
 
@@ -203,7 +203,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_type', type=str, default='multi', help='single/multi')
     parser.add_argument('--loss', type=str, default='ce', help='ce/dice/mix')
     parser.add_argument('--optimizer', type=str, default='sgd', help='sgd/adam/adamw')
-    parser.add_argument('--iscontinue', type=str, default=True, help='true/false')
+    parser.add_argument('--iscontinue', type=str, default=False, help='true/false')
     parser.add_argument('--smooth', type=str, default=False, help='true/false')
 
     parser.add_argument('--train_img_dir', type=str, default="../data/NPC20_V1/train/image")

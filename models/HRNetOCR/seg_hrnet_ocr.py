@@ -724,7 +724,8 @@ class HighResolutionNet(nn.Module):
         out_aux_seg.append(out_aux)
         out_aux_seg.append(out)
 
-        return out_aux_seg
+        return F.interpolate(out_aux, size=imsize, mode="bilinear", align_corners=ALIGN_CORNERS), \
+               F.interpolate(out, size=imsize, mode="bilinear", align_corners=ALIGN_CORNERS)
 
         # return F.interpolate(out, size=imsize, mode="bilinear", align_corners=True)
 

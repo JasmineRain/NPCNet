@@ -3,6 +3,9 @@ import torch
 import torch.nn.functional as F
 
 
+ALIGN_CORNERS = False
+
+
 def sampling_features(feature, points, **kwargs):
     add_dim = False
     if points.dim() == 3:
@@ -14,7 +17,7 @@ def sampling_features(feature, points, **kwargs):
     return output
 
 
-def sampling_points_v2(mask, N=4, k=3, beta=0.75, training=True):
+def sampling_points_v2(mask, N=4, k=3, beta=0.9, training=True):
     assert mask.dim() == 4
 
     device = mask.device
@@ -35,8 +38,23 @@ def sampling_points_v2(mask, N=4, k=3, beta=0.75, training=True):
         points[:, :, 1] = H_step / 2.0 + (idx // W).to(torch.float) * H_step
         return idx, points
 
+    # H_step, W_step = 1 / H, 1 / W
+    # N = min(H * W, N)
+    #
+    # temp, _ = torch.sort(mask, dim=1, descending=True)
+    # temp = temp.detach()
+    #
+    # uncertainty_map = -1 * (temp[:, 0, :, :] - temp[:, 1, :, :])
+    # _, idx = uncertainty_map.view(B, -1).topk(int(beta * N), dim=1, largest=True)
+    #
+    # importance = torch.zeros(B, int(beta * N), 2, dtype=torch.float, device=device)
+    # importance[:, :, 0] = W_step / 2.0 + (idx % W).to(torch.float) * W_step
+    # importance[:, :, 1] = H_step / 2.0 + (idx // W).to(torch.float) * H_step
+    # coverage = torch.rand(B, N - int(beta * N), 2, device=device)
+    # return torch.cat([importance, coverage], 1).to(device)
+
     over_generation = torch.rand(B, k * N, 2, device=device)
-    over_generation_map = sampling_features(mask, over_generation, align_corners=False)
+    over_generation_map = sampling_features(mask, over_generation, align_corners=ALIGN_CORNERS)
 
     temp, _ = torch.sort(over_generation_map, dim=1, descending=True)
     temp = temp.detach()

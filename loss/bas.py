@@ -136,6 +136,7 @@ class BasLoss(nn.Module):
         loss6 = ce_ssim_loss(pred6, labels_v)
         loss7 = ce_ssim_loss(pred7, labels_v)
 
-        loss = loss0 + loss1 + loss2 + loss3 + loss4 + loss5 + loss6 + loss7
+        # loss = loss0 + loss1 + loss2 + loss3 + loss4 + loss5 + loss6 + loss7
+        loss = loss0 + loss1
 
         return loss

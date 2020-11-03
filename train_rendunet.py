@@ -24,7 +24,7 @@ def train_val(config):
     train_loader = get_dataloader(img_dir=config.train_img_dir, mask_dir=config.train_mask_dir, mode="train",
                                   batch_size=config.batch_size, num_workers=config.num_workers, smooth=config.smooth)
     val_loader = get_dataloader(img_dir=config.val_img_dir, mask_dir=config.val_mask_dir, mode="val",
-                                batch_size=2, num_workers=config.num_workers)
+                                batch_size=config.batch_size, num_workers=config.num_workers)
 
     writer = SummaryWriter(
         comment="LR_%f_BS_%d_MODEL_%s_DATA" % (config.lr, config.batch_size, config.model_type))
@@ -49,7 +49,7 @@ def train_val(config):
         model = UNet()
 
     if config.iscontinue:
-        model = torch.load("./exp/9_RendUNet_0.5966.pth").module
+        model = torch.load("./exp/3_RendUNet_0.5893.pth").module
 
     for k, m in model.named_modules():
         m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatability
@@ -76,8 +76,8 @@ def train_val(config):
     criterion = MultiRendLoss()
 
     # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[25, 30, 35, 40], gamma=0.5)
-    # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=5, verbose=True)
-    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=20, eta_min=1e-5)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=6, verbose=True)
+    # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=20, eta_min=1e-5)
 
     global_step = 0
     max_miou = 0
@@ -95,7 +95,7 @@ def train_val(config):
 
                 pred = model(image)
                 seg_loss, point_loss3, point_loss4, point_loss5 = criterion(pred, mask)
-                loss = seg_loss + point_loss3 + point_loss4 + point_loss5
+                loss = 3 * seg_loss + point_loss3 + point_loss4 + point_loss5
                 epoch_loss += loss.item()
                 writer.add_scalar('Loss/train', loss.item(), global_step)
                 writer.add_scalar('Loss/seg_loss', seg_loss.item(), global_step)
@@ -114,54 +114,58 @@ def train_val(config):
 
             # scheduler.step()
             print("\ntraining epoch loss: " + str(epoch_loss / (float(config.num_train) / (float(config.batch_size)))))
-
+        torch.cuda.empty_cache()
         val_loss = 0
-        with tqdm(total=config.num_val, desc="Epoch %d / %d validation round" % (epoch + 1, config.num_epochs),
-                  unit='img', ncols=100) as val_pbar:
-            model.eval()
-            locker = 0
-            for image, mask in val_loader:
-                image = image.to(device, dtype=torch.float32)
-                target = mask.to(device, dtype=torch.long).argmax(dim=1)
-                mask = mask.cpu().numpy()
-                pred = model(image)['fine']
-                val_loss += F.cross_entropy(pred, target).item()
-                pred = pred.cpu().detach().numpy()
-                mask = semantic_to_mask(mask, labels)
-                pred = semantic_to_mask(pred, labels)
-                cm += get_confusion_matrix(mask, pred, labels)
-                val_pbar.update(image.shape[0])
-                if locker == 25:
-                    writer.add_images('mask_a/true', mask[0, :, :], epoch + 1, dataformats='HW')
-                    writer.add_images('mask_a/pred', pred[0, :, :], epoch + 1, dataformats='HW')
-                    writer.add_images('mask_b/true', mask[1, :, :], epoch + 1, dataformats='HW')
-                    writer.add_images('mask_b/pred', pred[1, :, :], epoch + 1, dataformats='HW')
-                locker += 1
+        with torch.no_grad():
+            with tqdm(total=config.num_val, desc="Epoch %d / %d validation round" % (epoch + 1, config.num_epochs),
+                      unit='img', ncols=100) as val_pbar:
+                model.eval()
+                locker = 0
+                for image, mask in val_loader:
+                    image = image.to(device, dtype=torch.float32)
+                    target = mask.to(device, dtype=torch.long).argmax(dim=1)
+                    mask = mask.cpu().numpy()
+                    pred = model(image)['fine']
+                    val_loss += F.cross_entropy(pred, target).item()
+                    pred = pred.cpu().detach().numpy()
+                    mask = semantic_to_mask(mask, labels)
+                    pred = semantic_to_mask(pred, labels)
+                    cm += get_confusion_matrix(mask, pred, labels)
+                    val_pbar.update(image.shape[0])
+                    if locker == 25:
+                        writer.add_images('mask_a/true', mask[0, :, :], epoch + 1, dataformats='HW')
+                        writer.add_images('mask_a/pred', pred[0, :, :], epoch + 1, dataformats='HW')
+                        writer.add_images('mask_b/true', mask[1, :, :], epoch + 1, dataformats='HW')
+                        writer.add_images('mask_b/pred', pred[1, :, :], epoch + 1, dataformats='HW')
+                    locker += 1
 
-                # break
-            miou = get_miou(cm)
-            scheduler.step()
-            precision, recall = get_classification_report(cm)
-            writer.add_scalar('precision_tumor/val', precision[1], epoch + 1)
-            writer.add_scalar('precision_lympha/val', precision[2], epoch + 1)
-            writer.add_scalar('recall_tumor/val', recall[1], epoch + 1)
-            writer.add_scalar('recall_lympha/val', recall[2], epoch + 1)
-            if (miou[1] + miou[2]) / 2 > max_miou:
-                if torch.__version__ == "1.6.0":
-                    torch.save(model,
-                               config.result_path + "/%d_%s_%.4f.pth" % (epoch + 1, config.model_type, (miou[1] + miou[2]) / 2),
-                               _use_new_zipfile_serialization=False)
-                else:
-                    torch.save(model,
-                               config.result_path + "/%d_%s_%.4f.pth" % (epoch + 1, config.model_type, (miou[1] + miou[2]) / 2))
-                max_miou = (miou[1] + miou[2]) / 2
-            print("\n")
-            print(miou)
-            print("testing epoch loss: " + str(val_loss), "Foreground mIoU = %.4f" % ((miou[1] + miou[2]) / 2))
-            writer.add_scalar('Foreground mIoU/val', (miou[1] + miou[2]) / 2, epoch + 1)
-            writer.add_scalar('loss/val', val_loss, epoch + 1)
-            for idx, name in enumerate(objects):
-                writer.add_scalar('iou/val' + name, miou[idx], epoch + 1)
+                    # break
+                miou = get_miou(cm)
+                scheduler.step(miou[1] + miou[2])
+                precision, recall = get_classification_report(cm)
+                writer.add_scalar('precision_tumor/val', precision[1], epoch + 1)
+                writer.add_scalar('precision_lympha/val', precision[2], epoch + 1)
+                writer.add_scalar('recall_tumor/val', recall[1], epoch + 1)
+                writer.add_scalar('recall_lympha/val', recall[2], epoch + 1)
+                if (miou[1] + miou[2]) / 2 > max_miou:
+                    if torch.__version__ == "1.6.0":
+                        torch.save(model,
+                                   config.result_path + "/%d_%s_%.4f.pth" % (
+                                   epoch + 1, config.model_type, (miou[1] + miou[2]) / 2),
+                                   _use_new_zipfile_serialization=False)
+                    else:
+                        torch.save(model,
+                                   config.result_path + "/%d_%s_%.4f.pth" % (
+                                   epoch + 1, config.model_type, (miou[1] + miou[2]) / 2))
+                    max_miou = (miou[1] + miou[2]) / 2
+                print("\n")
+                print(miou)
+                print("testing epoch loss: " + str(val_loss), "Foreground mIoU = %.4f" % ((miou[1] + miou[2]) / 2))
+                writer.add_scalar('Foreground mIoU/val', (miou[1] + miou[2]) / 2, epoch + 1)
+                writer.add_scalar('loss/val', val_loss, epoch + 1)
+                for idx, name in enumerate(objects):
+                    writer.add_scalar('iou/val' + name, miou[idx], epoch + 1)
+        torch.cuda.empty_cache()
     writer.close()
     print("Training finished")
 
@@ -176,13 +180,13 @@ if __name__ == '__main__':
     parser.add_argument('--img_ch', type=int, default=3)
     parser.add_argument('--output_ch', type=int, default=3)
     parser.add_argument('--num_epochs', type=int, default=1000)
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=12)
     parser.add_argument('--num_workers', type=int, default=8)
-    parser.add_argument('--lr', type=float, default=5e-3)
+    parser.add_argument('--lr', type=float, default=1e-2)
     parser.add_argument('--model_type', type=str, default='RendUNet', help='UNet/UNet++/RefineNet')
     parser.add_argument('--loss', type=str, default='ce', help='ce/dice/mix')
     parser.add_argument('--optimizer', type=str, default='sgd', help='sgd/adam/adamw')
-    parser.add_argument('--iscontinue', type=str, default=True, help='true/false')
+    parser.add_argument('--iscontinue', type=str, default=False, help='true/false')
     parser.add_argument('--smooth', type=str, default=False, help='true/false')
 
     parser.add_argument('--train_img_dir', type=str, default="../data/NPC20_V1/train/image")

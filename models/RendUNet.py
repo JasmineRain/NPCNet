@@ -4,8 +4,11 @@ import torch.nn.functional as F
 from models.RendPoint import sampling_points_v2, sampling_features
 from torchvision import models
 from torch.nn import Module, Conv2d, Parameter, Softmax
+from collections import OrderedDict
 
 __all__ = ['RendUNet']
+
+ALIGN_CORNERS = False
 
 
 class ChannelSELayer(nn.Module):
@@ -120,16 +123,190 @@ class MLP(nn.Module):
         return out
 
 
+class PAM_Module(Module):
+    """ Position attention module"""
+
+    # Ref from SAGAN
+    def __init__(self, in_dim):
+        super(PAM_Module, self).__init__()
+        self.chanel_in = in_dim
+
+        self.query_conv = Conv2d(in_channels=in_dim, out_channels=in_dim // 8, kernel_size=1)
+        self.key_conv = Conv2d(in_channels=in_dim, out_channels=in_dim // 8, kernel_size=1)
+        self.value_conv = Conv2d(in_channels=in_dim, out_channels=in_dim, kernel_size=1)
+        self.gamma = Parameter(torch.zeros(1))
+
+        self.softmax = Softmax(dim=-1)
+
+    def forward(self, x):
+        """
+            inputs :
+                x : input feature maps( B X C X H X W)
+            returns :
+                out : attention value + input feature
+                attention: B X (HxW) X (HxW)
+        """
+        m_batchsize, C, height, width = x.size()
+        proj_query = self.query_conv(x).view(m_batchsize, -1, width * height).permute(0, 2, 1)
+        proj_key = self.key_conv(x).view(m_batchsize, -1, width * height)
+        energy = torch.bmm(proj_query, proj_key)
+        attention = self.softmax(energy)
+        proj_value = self.value_conv(x).view(m_batchsize, -1, width * height)
+
+        out = torch.bmm(proj_value, attention.permute(0, 2, 1))
+        out = out.view(m_batchsize, C, height, width)
+
+        out = self.gamma * out + x
+        return out
+
+
+class CAM_Module(Module):
+    """ Channel attention module"""
+
+    def __init__(self, in_dim):
+        super(CAM_Module, self).__init__()
+        self.chanel_in = in_dim
+
+        self.gamma = Parameter(torch.zeros(1))
+        self.softmax = Softmax(dim=-1)
+
+    def forward(self, x):
+        """
+            inputs :
+                x : input feature maps( B X C X H X W)
+            returns :
+                out : attention value + input feature
+                attention: B X C X C
+        """
+        m_batchsize, C, height, width = x.size()
+        proj_query = x.view(m_batchsize, C, -1)
+        proj_key = x.view(m_batchsize, C, -1).permute(0, 2, 1)
+        energy = torch.bmm(proj_query, proj_key)
+        energy_new = torch.max(energy, -1, keepdim=True)[0].expand_as(energy) - energy
+        attention = self.softmax(energy_new)
+        proj_value = x.view(m_batchsize, C, -1)
+
+        out = torch.bmm(attention, proj_value)
+        out = out.view(m_batchsize, C, height, width)
+
+        out = self.gamma * out + x
+        return out
+
+
+class DANetHead(nn.Module):
+
+    def __init__(self, in_channels, out_channels, norm_layer):
+        super(DANetHead, self).__init__()
+        inter_channels = in_channels // 4
+        self.conv5a = nn.Sequential(nn.Conv2d(in_channels, inter_channels, 3, padding=1, bias=False),
+                                    norm_layer(inter_channels),
+                                    nn.ReLU(inplace=True))
+
+        self.conv5c = nn.Sequential(nn.Conv2d(in_channels, inter_channels, 3, padding=1, bias=False),
+                                    norm_layer(inter_channels),
+                                    nn.ReLU(inplace=True))
+
+        self.sa = PAM_Module(inter_channels)
+        self.sc = CAM_Module(inter_channels)
+        self.conv51 = nn.Sequential(nn.Conv2d(inter_channels, inter_channels, 3, padding=1, bias=False),
+                                    norm_layer(inter_channels),
+                                    nn.ReLU(inplace=True))
+        self.conv52 = nn.Sequential(nn.Conv2d(inter_channels, inter_channels, 3, padding=1, bias=False),
+                                    norm_layer(inter_channels),
+                                    nn.ReLU(inplace=True))
+
+        self.conv8 = nn.Sequential(nn.Dropout2d(0.1, False), nn.Conv2d(512, out_channels, 1))
+
+    def forward(self, x):
+        feat1 = self.conv5a(x)
+        sa_feat = self.sa(feat1)
+        sa_conv = self.conv51(sa_feat)
+
+        feat2 = self.conv5c(x)
+        sc_feat = self.sc(feat2)
+        sc_conv = self.conv52(sc_feat)
+
+        feat_sum = sa_conv + sc_conv
+
+        sasc_output = self.conv8(feat_sum)
+
+        return sasc_output
+
+
+class ASPPBlock(nn.Module):
+    def __init__(self, in_channel=2048, out_channel=256, os=8, norm_layer=nn.BatchNorm2d):
+        '''
+        :param in_channel: default 2048 for resnet101
+        :param out_channel: default 256 for resnet101
+        :param os: 16 or 8
+        '''
+        super(ASPPBlock, self).__init__()
+        if os == 16:
+            rates = [1, 6, 12, 18]
+        elif os == 8:
+            rates = [1, 12, 24, 36]
+        else:
+            raise NotImplementedError
+
+        self.gave_pool = nn.Sequential(
+            OrderedDict([('gavg', nn.AdaptiveAvgPool2d(rates[0])),
+                         ('conv0_1', nn.Conv2d(in_channel, out_channel, kernel_size=1, bias=False)),
+                         ('bn0_1', norm_layer(out_channel)),
+                         ('relu0_1', nn.ReLU(inplace=True))])
+        )
+        self.conv1_1 = nn.Sequential(
+            OrderedDict([('conv0_2', nn.Conv2d(in_channel, out_channel, kernel_size=1, bias=False)),
+                         ('bn0_2', norm_layer(out_channel)),
+                         ('relu0_2', nn.ReLU(inplace=True))])
+        )
+        self.aspp_bra1 = nn.Sequential(
+            OrderedDict([('conv1_1', nn.Conv2d(in_channel, out_channel, kernel_size=3,
+                                               padding=rates[1], dilation=rates[1], bias=False)),
+                         ('bn1_1', norm_layer(out_channel)),
+                         ('relu1_1', nn.ReLU(inplace=True))])
+        )
+        self.aspp_bra2 = nn.Sequential(
+            OrderedDict([('conv1_2', nn.Conv2d(in_channel, out_channel, kernel_size=3,
+                                               padding=rates[2], dilation=rates[2], bias=False)),
+                         ('bn1_2', norm_layer(out_channel)),
+                         ('relu1_2', nn.ReLU(inplace=True))])
+        )
+        self.aspp_bra3 = nn.Sequential(
+            OrderedDict([('conv1_3', nn.Conv2d(in_channel, out_channel, kernel_size=3,
+                                               padding=rates[3], dilation=rates[3], bias=False)),
+                         ('bn1_3', norm_layer(out_channel)),
+                         ('relu1_3', nn.ReLU(inplace=True))])
+        )
+        self.aspp_catdown = nn.Sequential(
+            OrderedDict([('conv_down', nn.Conv2d(5 * out_channel, out_channel, kernel_size=1, bias=False)),
+                         ('bn_down', norm_layer(out_channel)),
+                         ('relu_down', nn.ReLU(inplace=True)),
+                         ('drop_out', nn.Dropout(.1))])
+        )
+
+    def forward(self, x):
+        size = x.size()
+        x1 = F.interpolate(self.gave_pool(x), size[2:], mode='bilinear', align_corners=ALIGN_CORNERS)
+        x = torch.cat([x1, self.conv1_1(x),
+                       self.aspp_bra1(x),
+                       self.aspp_bra2(x),
+                       self.aspp_bra3(x)], dim=1)
+        x = self.aspp_catdown(x)
+        return x
+
+
 class SegNet(nn.Module):
 
     def __init__(self, pretrained="resnet50", n_class=3, norm_layer=nn.BatchNorm2d):
         super(SegNet, self).__init__()
 
         if pretrained == "resnet50":
-            pretrained = models.resnet50(pretrained=False, progress=True, replace_stride_with_dilation=[0, 1, 1], norm_layer=norm_layer)
+            pretrained = models.resnet50(pretrained=False, progress=True, replace_stride_with_dilation=[0, 1, 1],
+                                         norm_layer=norm_layer)
             pretrained.load_state_dict(torch.load("./resnet50-19c8e357.pth", map_location='cpu'))
         elif pretrained == "resnet101":
-            pretrained = models.resnet101(pretrained=False, progress=True, replace_stride_with_dilation=[0, 1, 1], norm_layer=norm_layer)
+            pretrained = models.resnet101(pretrained=False, progress=True, replace_stride_with_dilation=[0, 1, 1],
+                                          norm_layer=norm_layer)
             pretrained.load_state_dict(torch.load("./resnet101-5d3b4d8f.pth", map_location='cpu'))
 
         self.refine = RefineUnit(in_channel=3, out_channel=64, residual=False)
@@ -152,13 +329,22 @@ class SegNet(nn.Module):
         # 2048 24
         self.layer4 = pretrained.layer4
 
-        self.att = ChannelSpatialSELayer(num_channels=2048, reduction_ratio=4)
+        # self.att = DANetHead(in_channels=2048, out_channels=n_class, norm_layer=norm_layer)
 
-        self.seg = nn.Sequential(nn.Dropout2d(0.1, False), nn.Conv2d(2048, n_class, 1))
+        self.csse = ChannelSpatialSELayer(num_channels=2048, reduction_ratio=4)
+
+        self.aspp = ASPPBlock(in_channel=2048, out_channel=512, os=8)
+
+        self.seg = nn.Sequential(nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0),
+                                 norm_layer(512),
+                                 nn.ReLU(inplace=True),
+                                 nn.Conv2d(512, 3, kernel_size=1, stride=1, padding=0, bias=True)
+                                 )
 
     def forward(self, x):
         # encoder
         refine = self.refine(x)
+        # print(refine.shape)
         x0 = self.layer0(x)
         # print(x0.shape)
         x1 = self.layer1(x0)
@@ -170,7 +356,7 @@ class SegNet(nn.Module):
         x4 = self.layer4(x3)
         # print(x4.shape)
 
-        coarse = self.seg(self.att(x4))
+        coarse = self.seg(self.aspp(self.csse(x4)))
 
         return refine, x0, x1, x2, x3, coarse
 
@@ -210,11 +396,11 @@ class RendNet(nn.Module):
 
         # coarse size: 96x96
         # rend stage 3 with layer1
-        temp3 = F.interpolate(coarse, scale_factor=2, mode='bilinear', align_corners=False)
+        temp3 = F.interpolate(coarse, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
         # print("temp3 value: ", temp3.max(), temp3.min(), temp3.shape)
-        points3 = sampling_points_v2(torch.softmax(temp3, dim=1), N=256, k=60, beta=0.9)
-        coarse_feature = sampling_features(temp3, points3, align_corners=False)
-        fine_feature = sampling_features(x1, points3, align_corners=False)
+        points3 = sampling_points_v2(torch.softmax(temp3, dim=1), N=128, k=200, beta=0.95)
+        coarse_feature = sampling_features(temp3, points3, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(x1, points3, align_corners=ALIGN_CORNERS)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend3 = self.mlp1(feature_representation)
         # print("\n stage 3")
@@ -222,11 +408,11 @@ class RendNet(nn.Module):
 
         # coarse size: 192x192
         # rend stage 4 with layer0
-        temp4 = F.interpolate(temp3, scale_factor=2, mode='bilinear', align_corners=False)
+        temp4 = F.interpolate(temp3, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
         # print("temp4 value: ", temp4.max(), temp4.min(), temp4.shape)
-        points4 = sampling_points_v2(torch.softmax(temp4, dim=1), N=1024, k=60, beta=0.9)
-        coarse_feature = sampling_features(temp4, points4, align_corners=False)
-        fine_feature = sampling_features(x0, points4, align_corners=False)
+        points4 = sampling_points_v2(torch.softmax(temp4, dim=1), N=256, k=200, beta=0.95)
+        coarse_feature = sampling_features(temp4, points4, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(x0, points4, align_corners=ALIGN_CORNERS)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend4 = self.mlp0(feature_representation)
         # print("\n stage 4")
@@ -234,11 +420,11 @@ class RendNet(nn.Module):
 
         # coarse size: 384x384
         # rend stage 5 with layer refined
-        temp5 = F.interpolate(temp4, scale_factor=2, mode='bilinear', align_corners=False)
+        temp5 = F.interpolate(temp4, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
         # print("temp5 value: ", temp5.max(), temp5.min(), temp5.shape)
-        points5 = sampling_points_v2(torch.softmax(temp5, dim=1), N=4096, k=60, beta=0.9)
-        coarse_feature = sampling_features(temp5, points5, align_corners=False)
-        fine_feature = sampling_features(refine, points5, align_corners=False)
+        points5 = sampling_points_v2(torch.softmax(temp5, dim=1), N=512, k=200, beta=0.95)
+        coarse_feature = sampling_features(temp5, points5, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(refine, points5, align_corners=ALIGN_CORNERS)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend5 = self.mlp_refine(feature_representation)
         # print("\n stage 5")
@@ -285,11 +471,11 @@ class RendNet(nn.Module):
 
         # stage 3
         # 96x96
-        coarse3 = F.interpolate(coarse, scale_factor=2, mode='bilinear', align_corners=False)
+        coarse3 = F.interpolate(coarse, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
         temp = coarse3
-        points_idx, points = sampling_points_v2(torch.softmax(temp, dim=1), 512, training=self.training)
-        coarse_feature = sampling_features(temp, points, align_corners=False)
-        fine_feature = sampling_features(x1, points, align_corners=False)
+        points_idx, points = sampling_points_v2(torch.softmax(temp, dim=1), 1024, training=self.training)
+        coarse_feature = sampling_features(temp, points, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(x1, points, align_corners=ALIGN_CORNERS)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend = self.mlp1(feature_representation)
         B, C, H, W = coarse3.shape
@@ -300,11 +486,11 @@ class RendNet(nn.Module):
 
         # stage 4
         # 192x192
-        coarse4 = F.interpolate(coarse3, scale_factor=2, mode='bilinear', align_corners=False)
+        coarse4 = F.interpolate(coarse3, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
         temp = coarse4
-        points_idx, points = sampling_points_v2(torch.softmax(temp, dim=1), 512, training=self.training)
-        coarse_feature = sampling_features(temp, points, align_corners=False)
-        fine_feature = sampling_features(x0, points, align_corners=False)
+        points_idx, points = sampling_points_v2(torch.softmax(temp, dim=1), 1024, training=self.training)
+        coarse_feature = sampling_features(temp, points, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(x0, points, align_corners=ALIGN_CORNERS)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend = self.mlp0(feature_representation)
         B, C, H, W = coarse4.shape
@@ -315,11 +501,11 @@ class RendNet(nn.Module):
 
         # stage 5
         # 384x384
-        coarse5 = F.interpolate(coarse4, scale_factor=2, mode='bilinear', align_corners=False)
+        coarse5 = F.interpolate(coarse4, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
         temp = coarse5
-        points_idx, points = sampling_points_v2(torch.softmax(temp, dim=1), 512, training=self.training)
-        coarse_feature = sampling_features(temp, points, align_corners=False)
-        fine_feature = sampling_features(refine, points, align_corners=False)
+        points_idx, points = sampling_points_v2(torch.softmax(temp, dim=1), 1024, training=self.training)
+        coarse_feature = sampling_features(temp, points, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(refine, points, align_corners=ALIGN_CORNERS)
         feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
         rend = self.mlp_refine(feature_representation)
         B, C, H, W = coarse5.shape

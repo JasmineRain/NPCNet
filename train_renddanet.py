@@ -4,7 +4,7 @@ import os
 from util import semantic_to_mask, mask_to_semantic, get_confusion_matrix, get_miou, get_classification_report
 import torch.nn.functional as F
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1, 3'
 import torch
 import torch.nn as nn
 from torch.optim import SGD, lr_scheduler, adamw
@@ -51,7 +51,7 @@ def train_val(config):
         model = UNet()
 
     if config.iscontinue:
-        model = torch.load("./exp/24_Deeplabv3+_0.7825757691389714.pth").module
+        model = torch.load("./exp/21_RendDANet_0.6905.pth").module
 
     for k, m in model.named_modules():
         m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatability
@@ -115,54 +115,58 @@ def train_val(config):
 
             # scheduler.step()
             print("\ntraining epoch loss: " + str(epoch_loss / (float(config.num_train) / (float(config.batch_size)))))
-
+        torch.cuda.empty_cache()
         val_loss = 0
-        with tqdm(total=config.num_val, desc="Epoch %d / %d validation round" % (epoch + 1, config.num_epochs),
-                  unit='img', ncols=100) as val_pbar:
-            model.eval()
-            locker = 0
-            for image, mask in val_loader:
-                image = image.to(device, dtype=torch.float32)
-                target = mask.to(device, dtype=torch.long).argmax(dim=1)
-                mask = mask.cpu().numpy()
-                pred = model(image)['fine']
-                val_loss += F.cross_entropy(pred, target).item()
-                pred = pred.cpu().detach().numpy()
-                mask = semantic_to_mask(mask, labels)
-                pred = semantic_to_mask(pred, labels)
-                cm += get_confusion_matrix(mask, pred, labels)
-                val_pbar.update(image.shape[0])
-                if locker == 25:
-                    writer.add_images('mask_a/true', mask[2, :, :], epoch + 1, dataformats='HW')
-                    writer.add_images('mask_a/pred', pred[2, :, :], epoch + 1, dataformats='HW')
-                    writer.add_images('mask_b/true', mask[3, :, :], epoch + 1, dataformats='HW')
-                    writer.add_images('mask_b/pred', pred[3, :, :], epoch + 1, dataformats='HW')
-                locker += 1
+        with torch.no_grad():
+            with tqdm(total=config.num_val, desc="Epoch %d / %d validation round" % (epoch + 1, config.num_epochs),
+                      unit='img', ncols=100) as val_pbar:
+                model.eval()
+                locker = 0
+                for image, mask in val_loader:
+                    image = image.to(device, dtype=torch.float32)
+                    target = mask.to(device, dtype=torch.long).argmax(dim=1)
+                    mask = mask.cpu().numpy()
+                    pred = model(image)['fine']
+                    val_loss += F.cross_entropy(pred, target).item()
+                    pred = pred.cpu().detach().numpy()
+                    mask = semantic_to_mask(mask, labels)
+                    pred = semantic_to_mask(pred, labels)
+                    cm += get_confusion_matrix(mask, pred, labels)
+                    val_pbar.update(image.shape[0])
+                    if locker == 25:
+                        writer.add_images('mask_a/true', mask[2, :, :], epoch + 1, dataformats='HW')
+                        writer.add_images('mask_a/pred', pred[2, :, :], epoch + 1, dataformats='HW')
+                        writer.add_images('mask_b/true', mask[3, :, :], epoch + 1, dataformats='HW')
+                        writer.add_images('mask_b/pred', pred[3, :, :], epoch + 1, dataformats='HW')
+                    locker += 1
 
-                # break
-            miou = get_miou(cm)
-            scheduler.step()
-            precision, recall = get_classification_report(cm)
-            writer.add_scalar('precision_tumor/val', precision[1], epoch + 1)
-            writer.add_scalar('precision_lympha/val', precision[2], epoch + 1)
-            writer.add_scalar('recall_tumor/val', recall[1], epoch + 1)
-            writer.add_scalar('recall_lympha/val', recall[2], epoch + 1)
-            if (miou[1] + miou[2]) / 2 > max_miou:
-                if torch.__version__ == "1.6.0":
-                    torch.save(model,
-                               config.result_path + "/%d_%s_%.4f.pth" % (epoch + 1, config.model_type, (miou[1] + miou[2]) / 2),
-                               _use_new_zipfile_serialization=False)
-                else:
-                    torch.save(model,
-                               config.result_path + "/%d_%s_%.4f.pth" % (epoch + 1, config.model_type, (miou[1] + miou[2]) / 2))
-                max_miou = (miou[1] + miou[2]) / 2
-            print("\n")
-            print(miou)
-            print("testing epoch loss: " + str(val_loss), "Foreground mIoU = %.4f" % ((miou[1] + miou[2]) / 2))
-            writer.add_scalar('Foreground mIoU/val', (miou[1] + miou[2]) / 2, epoch + 1)
-            writer.add_scalar('loss/val', val_loss, epoch + 1)
-            for idx, name in enumerate(objects):
-                writer.add_scalar('iou/val' + name, miou[idx], epoch + 1)
+                    # break
+                miou = get_miou(cm)
+                scheduler.step()
+                precision, recall = get_classification_report(cm)
+                writer.add_scalar('precision_tumor/val', precision[1], epoch + 1)
+                writer.add_scalar('precision_lympha/val', precision[2], epoch + 1)
+                writer.add_scalar('recall_tumor/val', recall[1], epoch + 1)
+                writer.add_scalar('recall_lympha/val', recall[2], epoch + 1)
+                if (miou[1] + miou[2]) / 2 > max_miou:
+                    if torch.__version__ == "1.6.0":
+                        torch.save(model,
+                                   config.result_path + "/%d_%s_%.4f.pth" % (
+                                   epoch + 1, config.model_type, (miou[1] + miou[2]) / 2),
+                                   _use_new_zipfile_serialization=False)
+                    else:
+                        torch.save(model,
+                                   config.result_path + "/%d_%s_%.4f.pth" % (
+                                   epoch + 1, config.model_type, (miou[1] + miou[2]) / 2))
+                    max_miou = (miou[1] + miou[2]) / 2
+                print("\n")
+                print(miou)
+                print("testing epoch loss: " + str(val_loss), "Foreground mIoU = %.4f" % ((miou[1] + miou[2]) / 2))
+                writer.add_scalar('Foreground mIoU/val', (miou[1] + miou[2]) / 2, epoch + 1)
+                writer.add_scalar('loss/val', val_loss, epoch + 1)
+                for idx, name in enumerate(objects):
+                    writer.add_scalar('iou/val' + name, miou[idx], epoch + 1)
+        torch.cuda.empty_cache()
     writer.close()
     print("Training finished")
 
@@ -177,9 +181,9 @@ if __name__ == '__main__':
     parser.add_argument('--img_ch', type=int, default=3)
     parser.add_argument('--output_ch', type=int, default=8)
     parser.add_argument('--num_epochs', type=int, default=1000)
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument('--num_workers', type=int, default=8)
-    parser.add_argument('--lr', type=float, default=8e-3)
+    parser.add_argument('--lr', type=float, default=1e-2)
     parser.add_argument('--model_type', type=str, default='RendDANet', help='UNet/UNet++/RefineNet')
     parser.add_argument('--data_type', type=str, default='multi', help='single/multi')
     parser.add_argument('--loss', type=str, default='ce', help='ce/dice/mix')

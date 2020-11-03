@@ -11,6 +11,9 @@ from utils_Deeplab import SyncBN2d
 __all__ = ["RendDANet"]
 
 
+ALIGN_CORNERS = False
+
+
 class ChannelSELayer(nn.Module):
 
     def __init__(self, num_channels, reduction_ratio=8):
@@ -229,7 +232,7 @@ class DANetHead(nn.Module):
 
 
 class PointHead(nn.Module):
-    def __init__(self, in_c=515, num_classes=1, k=50, beta=0.9):
+    def __init__(self, in_c=515, num_classes=3, k=200, beta=0.95):
         super(PointHead, self).__init__()
         self.mlp = nn.Sequential(
             nn.Conv1d(in_channels=in_c, out_channels=256, kernel_size=1, stride=1, padding=0, bias=False),
@@ -248,10 +251,10 @@ class PointHead(nn.Module):
         if not self.training:
             return self.inference(x, feature, mask)
 
-        num_points = 256
+        num_points = 100
         points = sampling_points_v2(torch.softmax(mask, dim=1), num_points, self.k, self.beta)
-        coarse = sampling_features(mask, points, align_corners=False)
-        fine = sampling_features(feature, points, align_corners=False)
+        coarse = sampling_features(mask, points, align_corners=ALIGN_CORNERS)
+        fine = sampling_features(feature, points, align_corners=ALIGN_CORNERS)
         feature_representation = torch.cat([coarse, fine], dim=1)
         rend = self.mlp(feature_representation)
 
@@ -260,19 +263,22 @@ class PointHead(nn.Module):
     @torch.no_grad()
     def inference(self, x, feature, mask):
 
-        num_points = 1024
+        num_points = 768
         while mask.shape[-1] != x.shape[-1]:
-            mask = F.interpolate(mask, scale_factor=2, mode="bilinear", align_corners=False)
+            mask = F.interpolate(mask, scale_factor=2, mode="bilinear", align_corners=ALIGN_CORNERS)
 
             points_idx, points = sampling_points_v2(torch.softmax(mask, dim=1), num_points, training=self.training)
 
-            coarse = sampling_features(mask, points, align_corners=False)
-            fine = sampling_features(feature, points, align_corners=False)
+            coarse = sampling_features(mask, points, align_corners=ALIGN_CORNERS)
+            fine = sampling_features(feature, points, align_corners=ALIGN_CORNERS)
 
             feature_representation = torch.cat([coarse, fine], dim=1)
 
             rend = self.mlp(feature_representation)
-
+            # print("\n")
+            # print("coarse: ", coarse.shape, (coarse.argmax(dim=1) == 0).sum(), (coarse.argmax(dim=1) == 1).sum(), (coarse.argmax(dim=1) == 2).sum())
+            # print("rend: ", rend.shape, (rend.argmax(dim=1) == 0).sum(), (rend.argmax(dim=1) == 1).sum(), (rend.argmax(dim=1) == 2).sum())
+            # print("\n")
             B, C, H, W = mask.shape
 
             points_idx = points_idx.unsqueeze(1).expand(-1, C, -1)

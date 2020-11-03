@@ -9,7 +9,7 @@ import dilated as resnet
 from torchvision import models
 from utils_Deeplab import SyncBN2d
 
-__all__ = ["NewModel", "NewModel2", "NewModel3", "NewModel4", 'NewModel5', 'NewModel6', 'NewModel7']
+__all__ = ["NewModel", "NewModel2", "NewModel3", "NewModel4", 'NewModel5', 'NewModel6', 'NewModel7', 'NewModel8']
 
 ALIGN_CORNERS = True
 
@@ -453,7 +453,7 @@ class DANetHead(nn.Module):
 
 
 class PointHead(nn.Module):
-    def __init__(self, in_c=515, num_classes=1, k=100, beta=0.9):
+    def __init__(self, in_c=515, num_classes=1, k=200, beta=0.9):
         super(PointHead, self).__init__()
         self.mlp = nn.Sequential(
             nn.Conv1d(in_channels=in_c, out_channels=256, kernel_size=1, stride=1, padding=0, bias=False),
@@ -472,7 +472,7 @@ class PointHead(nn.Module):
         if not self.training:
             return self.inference(x, feature, mask)
 
-        num_points = 192
+        num_points = 100
         points = sampling_points_v2(torch.softmax(mask, dim=1), num_points, self.k, self.beta)
         coarse = sampling_features(mask, points, align_corners=False)
         fine = sampling_features(feature, points, align_corners=False)
@@ -681,6 +681,46 @@ class NewModel7(BaseNet):
 
         return F.interpolate(out_aux, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), F.interpolate(
             out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
+
+
+class NewModel8(BaseNet):
+
+    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
+        super(NewModel8, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
+        self.da_head = DANetHead(2048)
+        self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
+        self.conv3x3_ocr = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+                                         norm_layer(512),
+                                         nn.ReLU(inplace=True)
+                                         )
+        self.ocr_gather_head = SpatialGather_Module(3)
+        self.ocr_distri_head = SpatialOCR_Module(in_channels=512,
+                                                 key_channels=256,
+                                                 out_channels=512,
+                                                 scale=1,
+                                                 dropout=0.05,
+                                                 )
+        self.aux_head = nn.Sequential(nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0),
+                                      norm_layer(512),
+                                      nn.ReLU(inplace=True),
+                                      nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+                                      )
+        self.cls_head = nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+        self.rend_head = PointHead(in_c=515, num_classes=nclass)
+
+    def forward(self, x):
+        _, c2, _, c4 = self.base_forward(x)
+        feats = self.aspp(self.da_head(c4))
+        out_aux = self.aux_head(feats)
+        feats = self.conv3x3_ocr(feats)
+        context = self.ocr_gather_head(feats, out_aux)
+        feats = self.ocr_distri_head(feats, context)
+        out = self.cls_head(feats)
+        final = self.rend_head(x, c2, out)
+
+        return F.interpolate(out_aux, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), \
+               F.interpolate(out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), \
+               final
 
 
 if __name__ == "__main__":
