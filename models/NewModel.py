@@ -9,9 +9,10 @@ import dilated as resnet
 from torchvision import models
 from utils_Deeplab import SyncBN2d
 
-__all__ = ["NewModel", "NewModel2", "NewModel3", "NewModel4", 'NewModel5', 'NewModel6', 'NewModel7', 'NewModel8']
+__all__ = ["NewModel", "NewModel2", "NewModel3", "NewModel4", 'NewModel5', 'NewModel6', 'NewModel7', 'NewModel8',
+           'NewModel9', 'NewModel10']
 
-ALIGN_CORNERS = True
+ALIGN_CORNERS = False
 
 
 class ASPPBlock(nn.Module):
@@ -228,8 +229,7 @@ class SpatialGather_Module(nn.Module):
         feats = feats.view(batch_size, feats.size(1), -1)
         feats = feats.permute(0, 2, 1)  # batch x hw x c
         probs = F.softmax(self.scale * probs, dim=2)  # batch x k x hw
-        ocr_context = torch.matmul(probs, feats) \
-            .permute(0, 2, 1).unsqueeze(3)  # batch x k x c
+        ocr_context = torch.matmul(probs, feats).permute(0, 2, 1).unsqueeze(3)  # batch x k x c
         return ocr_context
 
 
@@ -453,7 +453,7 @@ class DANetHead(nn.Module):
 
 
 class PointHead(nn.Module):
-    def __init__(self, in_c=515, num_classes=1, k=200, beta=0.9):
+    def __init__(self, in_c=515, num_classes=1, k=800, beta=0.95):
         super(PointHead, self).__init__()
         self.mlp = nn.Sequential(
             nn.Conv1d(in_channels=in_c, out_channels=256, kernel_size=1, stride=1, padding=0, bias=False),
@@ -474,8 +474,8 @@ class PointHead(nn.Module):
 
         num_points = 100
         points = sampling_points_v2(torch.softmax(mask, dim=1), num_points, self.k, self.beta)
-        coarse = sampling_features(mask, points, align_corners=False)
-        fine = sampling_features(feature, points, align_corners=False)
+        coarse = sampling_features(mask, points, align_corners=ALIGN_CORNERS)
+        fine = sampling_features(feature, points, align_corners=ALIGN_CORNERS)
         feature_representation = torch.cat([coarse, fine], dim=1)
         rend = self.mlp(feature_representation)
 
@@ -486,12 +486,12 @@ class PointHead(nn.Module):
 
         num_points = 1024
         while mask.shape[-1] != x.shape[-1]:
-            mask = F.interpolate(mask, scale_factor=2, mode="bilinear", align_corners=False)
+            mask = F.interpolate(mask, scale_factor=2, mode="bilinear", align_corners=ALIGN_CORNERS)
 
             points_idx, points = sampling_points_v2(torch.softmax(mask, dim=1), num_points, training=self.training)
 
-            coarse = sampling_features(mask, points, align_corners=False)
-            fine = sampling_features(feature, points, align_corners=False)
+            coarse = sampling_features(mask, points, align_corners=ALIGN_CORNERS)
+            fine = sampling_features(feature, points, align_corners=ALIGN_CORNERS)
 
             feature_representation = torch.cat([coarse, fine], dim=1)
 
@@ -544,33 +544,39 @@ class NewModel(BaseNet):
             out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
 
 
-# SCSE
+# base
 class NewModel2(BaseNet):
     def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
         super(NewModel2, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
         self.da_head = DANetHead(in_channels=2048)
-        # self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
-        self.seg = nn.Sequential(nn.Dropout(0.1),
-                                 nn.Conv2d(2048, nclass, kernel_size=1, stride=1, padding=0, bias=True))
+        self.seg = nn.Sequential(nn.Conv2d(2048, 512, kernel_size=1, stride=1, padding=0),
+                                 norm_layer(512),
+                                 nn.ReLU(inplace=True),
+                                 nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+                                 )
 
     def forward(self, x):
         _, _, _, c4 = self.base_forward(x)
-        mask = self.seg(self.da_head(c4))
+        # mask = self.seg(self.da_head(c4))
+        mask = self.seg(c4)
         return F.interpolate(mask, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
 
 
-# ASPP
+# base + SCSE + ASPP
 class NewModel3(BaseNet):
     def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
         super(NewModel3, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
-        # self.da_head = DANetHead(in_channels=2048)
+        self.da_head = DANetHead(in_channels=2048)
         self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
-        self.seg = nn.Sequential(nn.Dropout(0.1),
-                                 nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True))
+        self.seg = nn.Sequential(nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0),
+                                 norm_layer(512),
+                                 nn.ReLU(inplace=True),
+                                 nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+                                 )
 
     def forward(self, x):
         _, _, _, c4 = self.base_forward(x)
-        mask = self.seg(self.aspp(c4))
+        mask = self.seg(self.aspp(self.da_head(c4)))
         return F.interpolate(mask, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
 
 
@@ -608,12 +614,11 @@ class NewModel5(BaseNet):
         return F.interpolate(out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
 
 
-# SCSE + ASPP + OCR
+# base + ASPP + OCR
 class NewModel6(BaseNet):
 
     def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
         super(NewModel6, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
-        self.da_head = DANetHead(2048)
         self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
         self.conv3x3_ocr = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
                                          norm_layer(512),
@@ -626,7 +631,7 @@ class NewModel6(BaseNet):
                                                  scale=1,
                                                  dropout=0.05,
                                                  )
-        self.aux_head = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+        self.aux_head = nn.Sequential(nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0),
                                       norm_layer(512),
                                       nn.ReLU(inplace=True),
                                       nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
@@ -635,7 +640,7 @@ class NewModel6(BaseNet):
 
     def forward(self, x):
         _, _, _, c4 = self.base_forward(x)
-        feats = self.aspp(self.da_head(c4))
+        feats = self.aspp(c4)
         out_aux = self.aux_head(feats)
         feats = self.conv3x3_ocr(feats)
         context = self.ocr_gather_head(feats, out_aux)
@@ -723,12 +728,210 @@ class NewModel8(BaseNet):
                final
 
 
+# RendHead using OCR features
+class NewModel9(BaseNet):
+
+    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
+        super(NewModel9, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
+        self.da_head = DANetHead(2048)
+        self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
+        self.conv3x3_ocr = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+                                         norm_layer(512),
+                                         nn.ReLU(inplace=True)
+                                         )
+        self.ocr_gather_head = SpatialGather_Module(3)
+        self.ocr_distri_head = SpatialOCR_Module(in_channels=512,
+                                                 key_channels=256,
+                                                 out_channels=512,
+                                                 scale=1,
+                                                 dropout=0.05,
+                                                 )
+        self.aux_head = nn.Sequential(nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0),
+                                      norm_layer(512),
+                                      nn.ReLU(inplace=True),
+                                      nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+                                      )
+        self.cls_head = nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+        self.rend_head = PointHead(in_c=515, num_classes=nclass)
+
+    def forward(self, x):
+        _, _, _, c4 = self.base_forward(x)
+        feats = self.aspp(self.da_head(c4))
+        out_aux = self.aux_head(feats)
+        feats = self.conv3x3_ocr(feats)
+        context = self.ocr_gather_head(feats, out_aux)
+        feats = self.ocr_distri_head(feats, context)
+        out = self.cls_head(feats)
+        final = self.rend_head(x, feats, out)
+
+        return F.interpolate(out_aux, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), \
+               F.interpolate(out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), \
+               final
+
+
+class MLP(nn.Module):
+    def __init__(self, fc_dim_in, fc_dims, num_classes):
+        super(MLP, self).__init__()
+        self.fc_dim_in = fc_dim_in
+        self.fc_dims = fc_dims
+        self.fc_nums = len(self.fc_dims)
+        self.num_classes = num_classes
+        self.mlp = nn.Sequential()
+        for i in range(self.fc_nums):
+            self.fc_dim = self.fc_dims[i]
+            self.mlp.add_module("fc{}".format(i + 1),
+                                nn.Conv1d(in_channels=self.fc_dim_in, out_channels=self.fc_dim, kernel_size=1, stride=1,
+                                          padding=0, bias=True))
+            self.mlp.add_module("relu{}".format(i + 1),
+                                nn.ReLU(inplace=True))
+            self.fc_dim_in = self.fc_dim
+        self.mlp.add_module("final_fc",
+                            nn.Conv1d(in_channels=self.fc_dim_in, out_channels=self.num_classes, kernel_size=1,
+                                      stride=1, padding=0))
+
+    def forward(self, x):
+        out = self.mlp(x)
+        return out
+
+
+class RendNet(nn.Module):
+    def __init__(self, n_class):
+        super(RendNet, self).__init__()
+        self.mlp3 = MLP(fc_dim_in=1027, fc_dims=[256, 256, 256], num_classes=n_class)
+        self.mlp2 = MLP(fc_dim_in=515, fc_dims=[256, 256, 256], num_classes=n_class)
+        self.mlp1 = MLP(fc_dim_in=259, fc_dims=[256, 256, 256], num_classes=n_class)
+
+    def forward(self, x1, x2, x3, coarse):
+        if not self.training:
+            return self.inference(x1, x2, x3, coarse)
+
+        # coarse size: 64x64
+        # temp3 size : 128x128
+        temp3 = F.interpolate(coarse, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
+        points3 = sampling_points_v2(torch.softmax(temp3, dim=1), N=200, k=800, beta=0.95)
+        coarse_feature = sampling_features(temp3, points3, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(x3, points3, align_corners=ALIGN_CORNERS)
+        feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
+        rend3 = self.mlp3(feature_representation)
+
+        # temp3 size : 256x256
+        temp4 = F.interpolate(temp3, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
+        points4 = sampling_points_v2(torch.softmax(temp4, dim=1), N=400, k=800, beta=0.95)
+        coarse_feature = sampling_features(temp4, points4, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(x2, points4, align_corners=ALIGN_CORNERS)
+        feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
+        rend4 = self.mlp2(feature_representation)
+
+        # temp3 size : 512x512
+        temp5 = F.interpolate(temp4, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
+        points5 = sampling_points_v2(torch.softmax(temp5, dim=1), N=800, k=800, beta=0.95)
+        coarse_feature = sampling_features(temp5, points5, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(x1, points5, align_corners=ALIGN_CORNERS)
+        feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
+        rend5 = self.mlp1(feature_representation)
+
+        return {
+            "stage3": [points3, rend3],
+            "stage4": [points4, rend4],
+            "stage5": [points5, rend5],
+        }
+
+    @torch.no_grad()
+    def inference(self, x1, x2, x3, coarse):
+        # 128x128
+        coarse3 = F.interpolate(coarse, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
+        temp = coarse3
+        points_idx, points = sampling_points_v2(torch.softmax(temp, dim=1), 1024, training=self.training)
+        coarse_feature = sampling_features(temp, points, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(x3, points, align_corners=ALIGN_CORNERS)
+        feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
+        rend = self.mlp3(feature_representation)
+        B, C, H, W = coarse3.shape
+        points_idx = points_idx.unsqueeze(1).expand(-1, C, -1)
+        coarse3 = (coarse3.reshape(B, C, -1)
+                   .scatter_(2, points_idx, rend)
+                   .view(B, C, H, W))
+
+        # 256x256
+        coarse4 = F.interpolate(coarse3, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
+        temp = coarse4
+        points_idx, points = sampling_points_v2(torch.softmax(temp, dim=1), 1024, training=self.training)
+        coarse_feature = sampling_features(temp, points, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(x2, points, align_corners=ALIGN_CORNERS)
+        feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
+        rend = self.mlp2(feature_representation)
+        B, C, H, W = coarse4.shape
+        points_idx = points_idx.unsqueeze(1).expand(-1, C, -1)
+        coarse4 = (coarse4.reshape(B, C, -1)
+                   .scatter_(2, points_idx, rend)
+                   .view(B, C, H, W))
+
+        # 512x512
+        coarse5 = F.interpolate(coarse4, scale_factor=2, mode='bilinear', align_corners=ALIGN_CORNERS)
+        temp = coarse5
+        points_idx, points = sampling_points_v2(torch.softmax(temp, dim=1), 1024, training=self.training)
+        coarse_feature = sampling_features(temp, points, align_corners=ALIGN_CORNERS)
+        fine_feature = sampling_features(x1, points, align_corners=ALIGN_CORNERS)
+        feature_representation = torch.cat([coarse_feature, fine_feature], dim=1)
+        rend = self.mlp1(feature_representation)
+        B, C, H, W = coarse5.shape
+        points_idx = points_idx.unsqueeze(1).expand(-1, C, -1)
+        coarse5 = (coarse5.reshape(B, C, -1)
+                   .scatter_(2, points_idx, rend)
+                   .view(B, C, H, W))
+
+        return {
+            "fine": coarse5
+        }
+
+
+# using multi-stage rendering
+class NewModel10(BaseNet):
+
+    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
+        super(NewModel10, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
+        self.da_head = DANetHead(2048)
+        self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
+        self.conv3x3_ocr = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+                                         norm_layer(512),
+                                         nn.ReLU(inplace=True)
+                                         )
+        self.ocr_gather_head = SpatialGather_Module(3)
+        self.ocr_distri_head = SpatialOCR_Module(in_channels=512,
+                                                 key_channels=256,
+                                                 out_channels=512,
+                                                 scale=1,
+                                                 dropout=0.05,
+                                                 )
+        self.aux_head = nn.Sequential(nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0),
+                                      norm_layer(512),
+                                      nn.ReLU(inplace=True),
+                                      nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+                                      )
+        self.cls_head = nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+        self.rend_head = RendNet(n_class=3)
+
+    def forward(self, x):
+        c1, c2, c3, c4 = self.base_forward(x)
+        feats = self.aspp(self.da_head(c4))
+        out_aux = self.aux_head(feats)
+        feats = self.conv3x3_ocr(feats)
+        context = self.ocr_gather_head(feats, out_aux)
+        feats = self.ocr_distri_head(feats, context)
+        out = self.cls_head(feats)
+        final = self.rend_head(c1, c2, c3, out)
+
+        return F.interpolate(out_aux, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), \
+               F.interpolate(out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), \
+               final
+
+
 if __name__ == "__main__":
-    net = NewModel7(backbone='resnet101', nclass=3, pretrained=False)
+    net = NewModel10(backbone='resnet101', nclass=3, pretrained=False)
     img = torch.rand(2, 3, 512, 512)
     mask = torch.rand(2, 3, 512, 512)
     net.train()
-    aux, out = net(img)
+    aux, out, final = net(img)
     print(aux.shape, out.shape)
     # for k, v in output.items():
     #     print(k, v.shape)

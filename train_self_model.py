@@ -4,7 +4,7 @@ import os
 from util import semantic_to_mask, mask_to_semantic, get_confusion_matrix, get_miou, get_classification_report
 import torch.nn.functional as F
 from models.RendPoint import sampling_features
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
 import torch
 import torch.nn as nn
 from torch.optim import SGD, lr_scheduler, adamw
@@ -49,8 +49,8 @@ def train_val(config):
     elif config.model_type == "HRNet_OCR":
         model = seg_hrnet_ocr.get_seg_model()
     elif config.model_type == "NewModel":
-        model = NewModel8(nclass=3, backbone="resnet101", norm_layer=nn.BatchNorm2d, pretrained=True)
-        src = "./exp/state_dict_0.6976_no_rend.pth"
+        model = NewModel10(nclass=3, backbone="resnet101", norm_layer=nn.BatchNorm2d, pretrained=True)
+        src = "./exp/state_dict_0.7027_no_rend.pth"
         pretrained_dict = torch.load(src, map_location='cpu')
         print("load pretrained params from : " + src)
         model_dict = model.state_dict()
@@ -60,7 +60,7 @@ def train_val(config):
         model = UNet()
 
     if config.iscontinue:
-        model = torch.load("./exp/24_NewModel_0.6973.pth").module
+        model = torch.load("./exp/2_NewModel_0.7042.pth").module
 
     for k, m in model.named_modules():
         m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatability
@@ -68,23 +68,23 @@ def train_val(config):
     labels = [0, 1, 2]
     objects = ['背景', '原发灶', '淋巴结']
 
-    if config.freeze:
-        for param in model.backbone.parameters():
-            param.requires_grad = False
-        for param in model.da_head.parameters():
-            param.requires_grad = False
-        for param in model.aspp.parameters():
-            param.requires_grad = False
-        for param in model.conv3x3_ocr.parameters():
-            param.requires_grad = False
-        for param in model.ocr_gather_head.parameters():
-            param.requires_grad = False
-        for param in model.ocr_distri_head.parameters():
-            param.requires_grad = False
-        for param in model.aux_head.parameters():
-            param.requires_grad = False
-        for param in model.cls_head.parameters():
-            param.requires_grad = False
+    for param in model.backbone.parameters():
+        param.requires_grad = not config.freeze
+    for param in model.da_head.parameters():
+        param.requires_grad = not config.freeze
+    for param in model.aspp.parameters():
+        param.requires_grad = not config.freeze
+    for param in model.conv3x3_ocr.parameters():
+        param.requires_grad = not config.freeze
+    for param in model.ocr_gather_head.parameters():
+        param.requires_grad = not config.freeze
+    for param in model.ocr_distri_head.parameters():
+        param.requires_grad = not config.freeze
+    for param in model.aux_head.parameters():
+        param.requires_grad = not config.freeze
+    for param in model.cls_head.parameters():
+        param.requires_grad = not config.freeze
+
 
     if config.optimizer == "sgd":
         # optimizer = SGD(model.parameters(), lr=config.lr, weight_decay=1e-4, momentum=0.9)
@@ -145,13 +145,13 @@ def train_val(config):
                 else:
                     stage3, stage4, stage5 = items.values()
                     rend3 = stage3[1]
-                    gt_points3 = sampling_features(mask, stage3[0], mode='bilinear', align_corners=ALIGN_CORNERS).argmax(dim=1)
+                    gt_points3 = sampling_features(mask, stage3[0], mode='nearest', align_corners=ALIGN_CORNERS).argmax(dim=1)
                     point_loss3 = F.cross_entropy(rend3, gt_points3)
                     rend4 = stage4[1]
-                    gt_points4 = sampling_features(mask, stage4[0], mode='bilinear', align_corners=ALIGN_CORNERS).argmax(dim=1)
+                    gt_points4 = sampling_features(mask, stage4[0], mode='nearest', align_corners=ALIGN_CORNERS).argmax(dim=1)
                     point_loss4 = F.cross_entropy(rend4, gt_points4)
                     rend5 = stage5[1]
-                    gt_points5 = sampling_features(mask, stage5[0], mode='bilinear', align_corners=ALIGN_CORNERS).argmax(dim=1)
+                    gt_points5 = sampling_features(mask, stage5[0], mode='nearest', align_corners=ALIGN_CORNERS).argmax(dim=1)
                     point_loss5 = F.cross_entropy(rend5, gt_points5)
                     point_loss = point_loss3 + point_loss4 + point_loss5
 
@@ -159,8 +159,8 @@ def train_val(config):
                 aux_loss = criterion(aux_out, mask)
                 seg_loss = criterion(out, mask)
 
-                # loss = aux_loss + seg_loss + point_loss
-                loss = point_loss
+                loss = aux_loss + seg_loss + point_loss
+                # loss = point_loss
 
                 epoch_loss += loss.item()
 
@@ -173,7 +173,7 @@ def train_val(config):
                 optimizer1.zero_grad()
                 optimizer2.zero_grad()
                 loss.backward()
-                # optimizer1.step()
+                optimizer1.step()
                 optimizer2.step()
                 train_pbar.update(image.shape[0])
                 global_step += 1
@@ -218,6 +218,8 @@ def train_val(config):
                 writer.add_scalar('precision_lympha/val', precision[2], epoch + 1)
                 writer.add_scalar('recall_tumor/val', recall[1], epoch + 1)
                 writer.add_scalar('recall_lympha/val', recall[2], epoch + 1)
+                writer.add_scalar('f1_tumor/val', (2 * precision[1] * recall[1] / (precision[1] + recall[1])), epoch + 1)
+                writer.add_scalar('f1_lympha/val', (2 * precision[2] * recall[2] / (precision[2] + recall[2])), epoch + 1)
                 if (miou[1] + miou[2]) / 2 > max_miou:
                     if torch.__version__ == "1.6.0":
                         torch.save(model,
@@ -249,17 +251,17 @@ if __name__ == '__main__':
     parser.add_argument('--img_ch', type=int, default=3)
     parser.add_argument('--output_ch', type=int, default=3)
     parser.add_argument('--num_epochs', type=int, default=1000)
-    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--lr', type=float, default=1e-2)
     parser.add_argument('--model_type', type=str, default='NewModel', help='UNet/UNet++/RefineNet')
     parser.add_argument('--data_type', type=str, default='multi', help='single/multi')
     parser.add_argument('--loss', type=str, default='ce', help='ce/dice/mix')
     parser.add_argument('--optimizer', type=str, default='sgd', help='sgd/adam/adamw')
-    parser.add_argument('--iscontinue', type=str, default=False, help='true/false')
+    parser.add_argument('--iscontinue', type=str, default=True, help='true/false')
     parser.add_argument('--smooth', type=str, default=False, help='true/false')
-    parser.add_argument('--multi_stage', type=str, default=False, help='true/false')
-    parser.add_argument('--freeze', type=str, default=True, help='true/false')
+    parser.add_argument('--multi_stage', type=str, default=True, help='true/false')
+    parser.add_argument('--freeze', type=str, default=False, help='true/false')
 
     parser.add_argument('--train_img_dir', type=str, default="../data/NPC20_V1/train/image")
     parser.add_argument('--train_mask_dir', type=str, default="../data/NPC20_V1/train/mask")

@@ -4,7 +4,7 @@ import os
 from util import semantic_to_mask, mask_to_semantic, get_confusion_matrix, get_miou, get_classification_report
 import torch.nn.functional as F
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1'
 import torch
 import torch.nn as nn
 from torch.optim import SGD, lr_scheduler, adamw
@@ -46,7 +46,7 @@ def train_val(config):
     elif config.model_type == "HRNet_OCR":
         model = seg_hrnet_ocr.get_seg_model()
     elif config.model_type == "NewModel":
-        model = NewModel8(nclass=3, backbone="resnet101", norm_layer=nn.BatchNorm2d, pretrained=True)
+        model = NewModel6(nclass=3, backbone="resnet101", norm_layer=nn.BatchNorm2d, pretrained=True)
     else:
         model = UNet()
 
@@ -78,15 +78,14 @@ def train_val(config):
     criterion = nn.CrossEntropyLoss()
 
     # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[25, 30, 35, 40], gamma=0.5)
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=5, verbose=True)
-    # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15, eta_min=1e-5)
+    # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=5, verbose=True)
+    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15, eta_min=1e-5)
 
     global_step = 0
     max_miou = 0
     for epoch in range(config.num_epochs):
         epoch_loss = 0.0
         cm = np.zeros([3, 3])
-        aux_cm = np.zeros([3, 3])
         print(optimizer.param_groups[0]['lr'])
         with tqdm(total=config.num_train, desc="Epoch %d / %d" % (epoch + 1, config.num_epochs),
                   unit='img', ncols=100) as train_pbar:
@@ -134,7 +133,7 @@ def train_val(config):
                     target = mask.to(device, dtype=torch.long).argmax(dim=1)
                     mask = mask.cpu().numpy()
 
-                    aux_pred, pred = model(image)
+                    _, pred = model(image)
 
                     val_loss += F.cross_entropy(pred, target).item()
                     pred = pred.cpu().detach().numpy()
@@ -142,10 +141,10 @@ def train_val(config):
                     pred = semantic_to_mask(pred, labels)
                     cm += get_confusion_matrix(mask, pred, labels)
 
-                    aux_val_loss += F.cross_entropy(aux_pred, target).item()
-                    aux_pred = aux_pred.cpu().detach().numpy()
-                    aux_pred = semantic_to_mask(aux_pred, labels)
-                    aux_cm += get_confusion_matrix(mask, aux_pred, labels)
+                    # aux_val_loss += F.cross_entropy(aux_pred, target).item()
+                    # aux_pred = aux_pred.cpu().detach().numpy()
+                    # aux_pred = semantic_to_mask(aux_pred, labels)
+                    # aux_cm += get_confusion_matrix(mask, aux_pred, labels)
 
                     val_pbar.update(image.shape[0])
                     if locker == 25:
@@ -156,8 +155,8 @@ def train_val(config):
                     locker += 1
 
                 miou = get_miou(cm)
-                aux_miou = get_miou(aux_cm)
-                scheduler.step(miou[1] + miou[2])
+                # aux_miou = get_miou(aux_cm)
+                scheduler.step()
                 precision, recall = get_classification_report(cm)
                 writer.add_scalar('precision_tumor/val', precision[1], epoch + 1)
                 writer.add_scalar('precision_lympha/val', precision[2], epoch + 1)
@@ -174,13 +173,13 @@ def train_val(config):
                     max_miou = (miou[1] + miou[2]) / 2
                 print("\n")
                 print(miou)
-                print("aux_miou", aux_miou)
+                # print("aux_miou", aux_miou)
                 print("testing epoch loss: " + str(val_loss), "Foreground mIoU = %.4f" % ((miou[1] + miou[2]) / 2))
                 writer.add_scalar('Foreground mIoU/val', (miou[1] + miou[2]) / 2, epoch + 1)
                 writer.add_scalar('loss/val', val_loss, epoch + 1)
                 for idx, name in enumerate(objects):
                     writer.add_scalar('iou/val' + name, miou[idx], epoch + 1)
-                    writer.add_scalar('aux_iou/val' + name, aux_miou[idx], epoch + 1)
+                    # writer.add_scalar('aux_iou/val' + name, aux_miou[idx], epoch + 1)
                 torch.cuda.empty_cache()
     writer.close()
     print("Training finished")
@@ -190,14 +189,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # model hyper-parameters
-    parser.add_argument('--image_size', type=int, default=384)
+    parser.add_argument('--image_size', type=int, default=512)
 
     # training hyper-parameters
     parser.add_argument('--img_ch', type=int, default=3)
     parser.add_argument('--output_ch', type=int, default=8)
     parser.add_argument('--num_epochs', type=int, default=1000)
-    parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--num_workers', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--lr', type=float, default=1e-2)
     parser.add_argument('--model_type', type=str, default='NewModel', help='UNet/UNet++/RefineNet')
     parser.add_argument('--data_type', type=str, default='multi', help='single/multi')

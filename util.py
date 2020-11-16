@@ -22,7 +22,7 @@ def get_confusion_matrix(true, pred, labels):
 
 
 def get_miou(cm):
-    return np.diag(cm) / (cm.sum(1) + cm.sum(0) - np.diag(cm))
+    return np.diag(cm) / (cm.sum(1) + cm.sum(0) - np.diag(cm) + 1e-6)
 
 
 def label_smooth(mask, semantic_map, labels, alpha, radius):
