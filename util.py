@@ -14,6 +14,7 @@ def get_classification_report(cm):
         recall.append(cm[i, i] / cm[i, :].sum())
     return precision, recall
 
+
 def get_confusion_matrix(true, pred, labels):
     true = true.flatten()
     pred = pred.flatten()

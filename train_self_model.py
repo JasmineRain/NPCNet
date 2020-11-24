@@ -50,8 +50,8 @@ def train_val(config):
         model = seg_hrnet_ocr.get_seg_model()
     elif config.model_type == "NewModel":
         model = NewModel10(nclass=3, backbone="resnet101", norm_layer=nn.BatchNorm2d, pretrained=True)
-        src = "./exp/state_dict_0.7027_no_rend.pth"
-        pretrained_dict = torch.load(src, map_location='cpu')
+        src = "./exp/base_NewModel_0.6766.pth"
+        pretrained_dict = torch.load(src, map_location='cpu').module.state_dict()
         print("load pretrained params from : " + src)
         model_dict = model.state_dict()
         model_dict.update(pretrained_dict)
@@ -68,35 +68,36 @@ def train_val(config):
     labels = [0, 1, 2]
     objects = ['背景', '原发灶', '淋巴结']
 
-    for param in model.backbone.parameters():
-        param.requires_grad = not config.freeze
-    for param in model.da_head.parameters():
-        param.requires_grad = not config.freeze
-    for param in model.aspp.parameters():
-        param.requires_grad = not config.freeze
-    for param in model.conv3x3_ocr.parameters():
-        param.requires_grad = not config.freeze
-    for param in model.ocr_gather_head.parameters():
-        param.requires_grad = not config.freeze
-    for param in model.ocr_distri_head.parameters():
-        param.requires_grad = not config.freeze
-    for param in model.aux_head.parameters():
-        param.requires_grad = not config.freeze
-    for param in model.cls_head.parameters():
-        param.requires_grad = not config.freeze
+    # for param in model.backbone.parameters():
+    #     param.requires_grad = not config.freeze
+    # for param in model.da_head.parameters():
+    #     param.requires_grad = not config.freeze
+    # for param in model.aspp.parameters():
+    #     param.requires_grad = not config.freeze
+    # for param in model.conv3x3_ocr.parameters():
+    #     param.requires_grad = not config.freeze
+    # for param in model.ocr_gather_head.parameters():
+    #     param.requires_grad = not config.freeze
+    # for param in model.ocr_distri_head.parameters():
+    #     param.requires_grad = not config.freeze
+    # for param in model.aux_head.parameters():
+    #     param.requires_grad = not config.freeze
+    # for param in model.cls_head.parameters():
+    #     param.requires_grad = not config.freeze
 
 
     if config.optimizer == "sgd":
         # optimizer = SGD(model.parameters(), lr=config.lr, weight_decay=1e-4, momentum=0.9)
         optimizer1 = torch.optim.SGD([
             {'params': filter(lambda p: p.requires_grad, model.backbone.parameters()), 'lr': 1e-3},
-            {'params': filter(lambda p: p.requires_grad, model.da_head.parameters()), 'lr': 1e-3},
-            {'params': filter(lambda p: p.requires_grad, model.aspp.parameters()), 'lr': 1e-3},
-            {'params': filter(lambda p: p.requires_grad, model.conv3x3_ocr.parameters()), 'lr': 1e-3},
-            {'params': filter(lambda p: p.requires_grad, model.ocr_gather_head.parameters()), 'lr': 1e-3},
-            {'params': filter(lambda p: p.requires_grad, model.ocr_distri_head.parameters()), 'lr': 1e-3},
-            {'params': filter(lambda p: p.requires_grad, model.aux_head.parameters()), 'lr': 1e-3},
-            {'params': filter(lambda p: p.requires_grad, model.cls_head.parameters()), 'lr': 1e-3},
+            {'params': filter(lambda p: p.requires_grad, model.seg.parameters()), 'lr': 1e-3},
+            # {'params': filter(lambda p: p.requires_grad, model.da_head.parameters()), 'lr': 1e-3},
+            # {'params': filter(lambda p: p.requires_grad, model.aspp.parameters()), 'lr': 1e-3},
+            # {'params': filter(lambda p: p.requires_grad, model.conv3x3_ocr.parameters()), 'lr': 1e-3},
+            # {'params': filter(lambda p: p.requires_grad, model.ocr_gather_head.parameters()), 'lr': 1e-3},
+            # {'params': filter(lambda p: p.requires_grad, model.ocr_distri_head.parameters()), 'lr': 1e-3},
+            # {'params': filter(lambda p: p.requires_grad, model.aux_head.parameters()), 'lr': 1e-3},
+            # {'params': filter(lambda p: p.requires_grad, model.cls_head.parameters()), 'lr': 1e-3},
         ],
             lr=config.lr, momentum=0.9, weight_decay=1e-4
         )
@@ -114,6 +115,8 @@ def train_val(config):
     # criterion = nn.CrossEntropyLoss(weight=weight)
 
     criterion = nn.CrossEntropyLoss()
+
+    # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15, eta_min=1e-4)
 
     # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[25, 30, 35, 40], gamma=0.5)
     # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=5, verbose=True)
@@ -133,8 +136,8 @@ def train_val(config):
             for image, mask in train_loader:
                 image = image.to(device, dtype=torch.float32)
                 mask = mask.to(device, dtype=torch.float32)
-                aux_out, out, items = model(image)
-
+                # aux_out, out, items = model(image)
+                out, items = model(image)
                 if not config.multi_stage:
                     gt_points = sampling_features(mask, items['points'], mode='nearest', align_corners=ALIGN_CORNERS).argmax(dim=1)
                     rend = items['rend']
@@ -156,19 +159,23 @@ def train_val(config):
                     point_loss = point_loss3 + point_loss4 + point_loss5
 
                 mask = mask.long().argmax(dim=1)
-                aux_loss = criterion(aux_out, mask)
+                # aux_loss = criterion(aux_out, mask)
                 seg_loss = criterion(out, mask)
 
-                loss = aux_loss + seg_loss + point_loss
-                # loss = point_loss
+                # loss = aux_loss + seg_loss + point_loss
+                loss = point_loss + seg_loss
 
                 epoch_loss += loss.item()
 
-                writer.add_scalar('Loss/aux_out', aux_loss.item(), global_step)
+                # writer.add_scalar('Loss/aux_out', aux_loss.item(), global_step)
                 writer.add_scalar('Loss/out', seg_loss.item(), global_step)
                 writer.add_scalar('Loss/point', point_loss.item(), global_step)
                 writer.add_scalar('Loss/train', loss.item(), global_step)
                 train_pbar.set_postfix(**{'loss (batch)': loss.item()})
+
+                # optimizer.zero_grad()
+                # loss.backward()
+                # optimizer.step()
 
                 optimizer1.zero_grad()
                 optimizer2.zero_grad()
@@ -194,7 +201,8 @@ def train_val(config):
                     target = mask.to(device, dtype=torch.long).argmax(dim=1)
                     mask = mask.cpu().numpy()
 
-                    aux_pred, pred, final = model(image)
+                    # aux_pred, pred, final = model(image)
+                    pred, final = model(image)
                     final = final['fine']
                     val_loss += F.cross_entropy(final, target).item()
                     final = final.cpu().detach().numpy()
@@ -211,6 +219,7 @@ def train_val(config):
                     locker += 1
 
                 miou = get_miou(cm)
+                # scheduler.step()
                 scheduler1.step()
                 scheduler2.step()
                 precision, recall = get_classification_report(cm)
@@ -251,14 +260,14 @@ if __name__ == '__main__':
     parser.add_argument('--img_ch', type=int, default=3)
     parser.add_argument('--output_ch', type=int, default=3)
     parser.add_argument('--num_epochs', type=int, default=1000)
-    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--lr', type=float, default=1e-2)
     parser.add_argument('--model_type', type=str, default='NewModel', help='UNet/UNet++/RefineNet')
     parser.add_argument('--data_type', type=str, default='multi', help='single/multi')
     parser.add_argument('--loss', type=str, default='ce', help='ce/dice/mix')
     parser.add_argument('--optimizer', type=str, default='sgd', help='sgd/adam/adamw')
-    parser.add_argument('--iscontinue', type=str, default=True, help='true/false')
+    parser.add_argument('--iscontinue', type=str, default=False, help='true/false')
     parser.add_argument('--smooth', type=str, default=False, help='true/false')
     parser.add_argument('--multi_stage', type=str, default=True, help='true/false')
     parser.add_argument('--freeze', type=str, default=False, help='true/false')
