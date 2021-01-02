@@ -9,3 +9,4 @@ from .SEDANet import *
 from .scSEUNet import *
 from .AUNet import *
 from .NewModel import *
+from .RANet import *

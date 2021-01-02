@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.optim import SGD, lr_scheduler, adamw
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from models import UNetPP, UNet, rf101, DANet, SEDANet, scSEUNet, RendDANet, NewModel, NewModel2, NewModel3, NewModel4, NewModel5,  NewModel6, NewModel7, NewModel8
+from models import UNetPP, UNet, rf101, DANet, SEDANet, scSEUNet, RendDANet, NPCNet, NewModel2, NewModel3, NewModel4, NewModel5,  NewModel6, NewModel7, NewModel8
 from loss import LabelSmoothSoftmaxCE, LabelSmoothCE, RendLoss
 from utils_Deeplab import SyncBN2d
 from models.DeepLabV3_plus import deeplabv3_plus

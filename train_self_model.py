@@ -10,11 +10,8 @@ import torch.nn as nn
 from torch.optim import SGD, lr_scheduler, adamw
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from models import UNetPP, UNet, rf101, DANet, SEDANet, scSEUNet, RendDANet, NewModel, NewModel2, NewModel3, NewModel4, NewModel5,  NewModel6, NewModel7, NewModel8, NewModel9, NewModel10
-from loss import LabelSmoothSoftmaxCE, LabelSmoothCE, RendLoss
+from models import NPCNet
 from utils_Deeplab import SyncBN2d
-from models.DeepLabV3_plus import deeplabv3_plus
-from models.HRNetOCR import seg_hrnet_ocr
 from data_loader import get_dataloader
 
 
@@ -32,32 +29,13 @@ def train_val(config):
     writer = SummaryWriter(
         comment="LR_%f_BS_%d_MODEL_%s_DATA_%s" % (config.lr, config.batch_size, config.model_type, config.data_type))
 
-    if config.model_type == "UNet":
-        model = UNet()
-    elif config.model_type == "UNet++":
-        model = UNetPP()
-    elif config.model_type == "SEDANet":
-        model = SEDANet()
-    elif config.model_type == "RendDANet":
-        model = RendDANet(nclass=3, backbone="resnet101", norm_layer=nn.BatchNorm2d)
-    elif config.model_type == "RefineNet":
-        model = rf101()
-    elif config.model_type == "DANet":
-        model = DANet(backbone='resnet101', nclass=config.output_ch, pretrained=True, norm_layer=nn.BatchNorm2d)
-    elif config.model_type == "Deeplabv3+":
-        model = deeplabv3_plus.DeepLabv3_plus(in_channels=3, num_classes=8, backend='resnet101', os=16, pretrained=True, norm_layer=nn.BatchNorm2d)
-    elif config.model_type == "HRNet_OCR":
-        model = seg_hrnet_ocr.get_seg_model()
-    elif config.model_type == "NewModel":
-        model = NewModel10(nclass=3, backbone="resnet101", norm_layer=nn.BatchNorm2d, pretrained=True)
-        src = "./exp/base_NewModel_0.6766.pth"
-        pretrained_dict = torch.load(src, map_location='cpu').module.state_dict()
-        print("load pretrained params from : " + src)
-        model_dict = model.state_dict()
-        model_dict.update(pretrained_dict)
-        model.load_state_dict(model_dict)
-    else:
-        model = UNet()
+    model = NPCNet(nclass=3, backbone="resnet101", norm_layer=nn.BatchNorm2d, pretrained=True)
+    # src = "./exp/base_NewModel_0.6766.pth"
+    # pretrained_dict = torch.load(src, map_location='cpu').module.state_dict()
+    # print("load pretrained params from : " + src)
+    # model_dict = model.state_dict()
+    # model_dict.update(pretrained_dict)
+    # model.load_state_dict(model_dict)
 
     if config.iscontinue:
         model = torch.load("./exp/2_NewModel_0.7042.pth").module

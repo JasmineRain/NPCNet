@@ -4,13 +4,13 @@ import os
 from util import semantic_to_mask, mask_to_semantic, get_confusion_matrix, get_miou, get_classification_report
 import torch.nn.functional as F
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1, 3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
 import torch
 import torch.nn as nn
 from torch.optim import SGD, lr_scheduler, adamw
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from models import UNetPP, UNet, rf101, DANet, SEDANet, scSEUNet, BASNet, AUNet
+from models import UNetPP, UNet, rf101, DANet, SEDANet, scSEUNet, BASNet, AUNet, RDSN
 from loss import LabelSmoothSoftmaxCE, LabelSmoothCE, BasLoss
 from utils_Deeplab import SyncBN2d
 from models.DeepLabV3_plus import deeplabv3_plus
@@ -29,10 +29,6 @@ def train_val(config):
     writer = SummaryWriter(
         comment="LR_%f_BS_%d_MODEL_%s_DATA_%s" % (config.lr, config.batch_size, config.model_type, config.data_type))
 
-    if config.model_type not in ['UNet', 'UNet++', 'RefineNet', 'DANet', 'Deeplabv3+', 'SEDANet', 'HRNet_OCR', 'scSEUNet']:
-        print('ERROR!! model_type should be selected in supported model')
-        print('Choose model %s' % config.model_type)
-        return
     if config.model_type == "UNet":
         model = UNet(output_ch=config.output_ch)
     elif config.model_type == "AUNet":
@@ -53,6 +49,8 @@ def train_val(config):
         model = seg_hrnet_ocr.get_seg_model()
     elif config.model_type == "scSEUNet":
         model = scSEUNet(pretrained=True, norm_layer=nn.BatchNorm2d)
+    elif config.model_type == "RANet":
+        model = RDSN(nclass=config.output_ch)
     else:
         model = UNet()
 
@@ -92,8 +90,8 @@ def train_val(config):
             criterion = nn.CrossEntropyLoss()
 
     # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[25, 30, 35, 40], gamma=0.5)
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=5, verbose=True)
-    # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15, eta_min=1e-6)
+    # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.1, patience=5, verbose=True)
+    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=15, eta_min=1e-4)
 
     global_step = 0
     max_miou = 0
@@ -112,13 +110,14 @@ def train_val(config):
                 else:
                     mask = mask.to(device, dtype=torch.long).argmax(dim=1)
 
-                # pred = model(image)
-                aux_out, out = model(image)
-                aux_loss = criterion(aux_out, mask)
-                seg_loss = criterion(out, mask)
-                loss = aux_loss + seg_loss
+                pred = model(image)
 
-                # loss = criterion(pred, mask)
+                # aux_out, out = model(image)
+                # aux_loss = criterion(aux_out, mask)
+                # seg_loss = criterion(out, mask)
+                # loss = aux_loss + seg_loss
+
+                loss = criterion(pred, mask)
                 epoch_loss += loss.item()
 
                 writer.add_scalar('Loss/train', loss.item(), global_step)
@@ -145,7 +144,7 @@ def train_val(config):
                     image = image.to(device, dtype=torch.float32)
                     target = mask.to(device, dtype=torch.long).argmax(dim=1)
                     mask = mask.cpu().numpy()
-                    _, pred = model(image)
+                    pred = model(image)
                     val_loss += F.cross_entropy(pred, target).item()
                     pred = pred.cpu().detach().numpy()
                     mask = semantic_to_mask(mask, labels)
@@ -200,10 +199,10 @@ if __name__ == '__main__':
     parser.add_argument('--img_ch', type=int, default=3)
     parser.add_argument('--output_ch', type=int, default=3)
     parser.add_argument('--num_epochs', type=int, default=1000)
-    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=4)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--lr', type=float, default=1e-2)
-    parser.add_argument('--model_type', type=str, default='UNet', help='UNet/UNet++/RefineNet')
+    parser.add_argument('--model_type', type=str, default='RANet', help='UNet/UNet++/RefineNet')
     parser.add_argument('--data_type', type=str, default='multi', help='single/multi')
     parser.add_argument('--loss', type=str, default='ce', help='ce/dice/mix')
     parser.add_argument('--optimizer', type=str, default='sgd', help='sgd/adam/adamw')

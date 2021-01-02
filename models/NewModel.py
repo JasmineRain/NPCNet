@@ -9,8 +9,7 @@ import dilated as resnet
 from torchvision import models
 from utils_Deeplab import SyncBN2d
 
-__all__ = ["NewModel", "NewModel2", "NewModel3", "NewModel4", 'NewModel5', 'NewModel6', 'NewModel7', 'NewModel8',
-           'NewModel9', 'NewModel10']
+__all__ = ["NPCNet", "BaseModel", "BasePEM", "BaseSEM", "BaseBEM", "NewModel10"]
 
 ALIGN_CORNERS = False
 
@@ -225,8 +224,8 @@ class SpatialGather_Module(nn.Module):
 
     def forward(self, feats, probs):
         batch_size, c, h, w = probs.size(0), probs.size(1), probs.size(2), probs.size(3)
-        probs = probs.view(batch_size, c, -1)  # B K HW
-        feats = feats.view(batch_size, feats.size(1), -1)  # B C HW
+        probs = probs.view(batch_size, c, -1)
+        feats = feats.view(batch_size, feats.size(1), -1)
         feats = feats.permute(0, 2, 1)  # batch x hw x c
         probs = F.softmax(self.scale * probs, dim=2)  # batch x k x hw
         ocr_context = torch.matmul(probs, feats).permute(0, 2, 1).unsqueeze(3)  # batch x k x c
@@ -507,44 +506,24 @@ class PointHead(nn.Module):
         return {"fine": mask}
 
 
-# SCSE + ASPP + OCR
-class NewModel(BaseNet):
-
-    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
-        super(NewModel, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
-        self.da_head = DANetHead(2048)
-        self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
-        self.conv3x3_ocr = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
-                                         norm_layer(512),
-                                         nn.ReLU(inplace=True)
-                                         )
-        self.ocr_gather_head = SpatialGather_Module(3)
-        self.ocr_distri_head = SpatialOCR_Module(in_channels=512,
-                                                 key_channels=256,
-                                                 out_channels=512,
-                                                 scale=1,
-                                                 dropout=0.05,
-                                                 )
-        self.aux_head = nn.Sequential(nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0),
-                                      norm_layer(512),
-                                      nn.ReLU(inplace=True),
-                                      nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
-                                      )
-        self.cls_head = nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
-
-    def forward(self, x):
-        _, _, _, c4 = self.base_forward(x)
-        feats = self.aspp(self.da_head(c4))
-        out_aux = self.aux_head(feats)
-        context = self.ocr_gather_head(feats, out_aux)
-        feats = self.ocr_distri_head(feats, context)
-        out = self.cls_head(feats)
-
-        return F.interpolate(out_aux, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), F.interpolate(
-            out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
+# row version for base
+# class NewModel2(BaseNet):
+#     def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
+#         super(NewModel2, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
+#         self.da_head = DANetHead(in_channels=2048)
+#         self.seg = nn.Sequential(nn.Conv2d(2048, 512, kernel_size=1, stride=1, padding=0),
+#                                  norm_layer(512),
+#                                  nn.ReLU(inplace=True),
+#                                  nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+#                                  )
+#
+#     def forward(self, x):
+#         _, _, _, c4 = self.base_forward(x)
+#         mask = self.seg(c4)
+#         return F.interpolate(mask, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
 
 
-# base
+# row version for base + PEM
 class NewModel2(BaseNet):
     def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
         super(NewModel2, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
@@ -557,64 +536,11 @@ class NewModel2(BaseNet):
 
     def forward(self, x):
         _, _, _, c4 = self.base_forward(x)
-        # mask = self.seg(self.da_head(c4))
-        mask = self.seg(c4)
+        mask = self.seg(self.da_head(c4))
         return F.interpolate(mask, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
 
 
-# base + SCSE + ASPP
-class NewModel3(BaseNet):
-    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
-        super(NewModel3, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
-        self.da_head = DANetHead(in_channels=2048)
-        self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
-        self.seg = nn.Sequential(nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0),
-                                 norm_layer(512),
-                                 nn.ReLU(inplace=True),
-                                 nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
-                                 )
-
-    def forward(self, x):
-        _, _, _, c4 = self.base_forward(x)
-        mask = self.seg(self.aspp(self.da_head(c4)))
-        return F.interpolate(mask, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
-
-
-# Dual Attention + ASPP
-class NewModel4(BaseNet):
-    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
-        super(NewModel4, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
-        self.da_head = DANetHead2(in_channels=2048, out_channels=512, norm_layer=norm_layer)
-        self.aspp = ASPPBlock(in_channel=512, out_channel=512, norm_layer=norm_layer, os=8)
-        self.seg = nn.Sequential(nn.Dropout(0.1),
-                                 nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True))
-
-    def forward(self, x):
-        _, _, _, c4 = self.base_forward(x)
-        mask = self.seg(self.aspp(self.da_head(c4)))
-        return F.interpolate(mask, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
-
-
-# scse + aspp - OCR
-class NewModel5(BaseNet):
-    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
-        super(NewModel5, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
-        self.da_head = DANetHead(in_channels=2048)
-        self.aspp = ASPPBlock(in_channel=2048, out_channel=512, os=8, norm_layer=norm_layer)
-        self.seg = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
-                                 norm_layer(512),
-                                 nn.ReLU(inplace=True),
-                                 nn.Conv2d(512, 3, kernel_size=1, stride=1, padding=0, bias=True)
-                                 )
-
-    def forward(self, x):
-        _, _, _, c4 = self.base_forward(x)
-        out = self.seg(self.aspp(self.da_head(c4)))
-
-        return F.interpolate(out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
-
-
-# base + ASPP + OCR
+# row version for base + SEM
 class NewModel6(BaseNet):
 
     def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
@@ -651,11 +577,62 @@ class NewModel6(BaseNet):
             out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
 
 
-class NewModel7(BaseNet):
+# row version for base + BEM
+class NewModel10(BaseNet):
+    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
+        super(NewModel10, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
+        self.seg = nn.Sequential(nn.Conv2d(2048, 512, kernel_size=1, stride=1, padding=0),
+                                 norm_layer(512),
+                                 nn.ReLU(inplace=True),
+                                 nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+                                 )
+        self.rend_head = RendNet(n_class=3)
+
+    def forward(self, x):
+        c1, c2, c3, c4 = self.base_forward(x)
+        mask = self.seg(c4)
+        final = self.rend_head(c1, c2, c3, mask)
+        return F.interpolate(mask, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), final
+
+
+# base
+class BaseModel(BaseNet):
+    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
+        super(BaseModel, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
+        self.seg = nn.Sequential(nn.Conv2d(2048, 512, kernel_size=1, stride=1, padding=0),
+                                 norm_layer(512),
+                                 nn.ReLU(inplace=True),
+                                 nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+                                 )
+
+    def forward(self, x):
+        _, _, _, c4 = self.base_forward(x)
+        mask = self.seg(c4)
+        return F.interpolate(mask, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
+
+
+# base + PEM
+class BasePEM(BaseNet):
+    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
+        super(BasePEM, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
+        self.da_head = DANetHead(2048)
+        self.seg = nn.Sequential(nn.Conv2d(2048, 512, kernel_size=1, stride=1, padding=0),
+                                 norm_layer(512),
+                                 nn.ReLU(inplace=True),
+                                 nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+                                 )
+
+    def forward(self, x):
+        _, _, _, c4 = self.base_forward(x)
+        mask = self.seg(self.da_head(c4))
+        return F.interpolate(mask, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
+
+
+# base + SEM
+class BaseSEM(BaseNet):
 
     def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
-        super(NewModel7, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
-        self.da_head = DANetHead(2048)
+        super(BaseSEM, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
         self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
         self.conv3x3_ocr = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
                                          norm_layer(512),
@@ -677,7 +654,7 @@ class NewModel7(BaseNet):
 
     def forward(self, x):
         _, _, _, c4 = self.base_forward(x)
-        feats = self.aspp(self.da_head(c4))
+        feats = self.aspp(c4)
         out_aux = self.aux_head(feats)
         feats = self.conv3x3_ocr(feats)
         context = self.ocr_gather_head(feats, out_aux)
@@ -688,85 +665,22 @@ class NewModel7(BaseNet):
             out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
 
 
-class NewModel8(BaseNet):
-
+# base + BEM
+class BaseBEM(BaseNet):
     def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
-        super(NewModel8, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
-        self.da_head = DANetHead(2048)
-        self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
-        self.conv3x3_ocr = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
-                                         norm_layer(512),
-                                         nn.ReLU(inplace=True)
-                                         )
-        self.ocr_gather_head = SpatialGather_Module(3)
-        self.ocr_distri_head = SpatialOCR_Module(in_channels=512,
-                                                 key_channels=256,
-                                                 out_channels=512,
-                                                 scale=1,
-                                                 dropout=0.05,
-                                                 )
-        self.aux_head = nn.Sequential(nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0),
-                                      norm_layer(512),
-                                      nn.ReLU(inplace=True),
-                                      nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
-                                      )
-        self.cls_head = nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
-        self.rend_head = PointHead(in_c=515, num_classes=nclass)
+        super(BaseBEM, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
+        self.seg = nn.Sequential(nn.Conv2d(2048, 512, kernel_size=1, stride=1, padding=0),
+                                 norm_layer(512),
+                                 nn.ReLU(inplace=True),
+                                 nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+                                 )
+        self.rend_head = RendNet(n_class=3)
 
     def forward(self, x):
-        _, c2, _, c4 = self.base_forward(x)
-        feats = self.aspp(self.da_head(c4))
-        out_aux = self.aux_head(feats)
-        feats = self.conv3x3_ocr(feats)
-        context = self.ocr_gather_head(feats, out_aux)
-        feats = self.ocr_distri_head(feats, context)
-        out = self.cls_head(feats)
-        final = self.rend_head(x, c2, out)
-
-        return F.interpolate(out_aux, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), \
-               F.interpolate(out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), \
-               final
-
-
-# RendHead using OCR features
-class NewModel9(BaseNet):
-
-    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
-        super(NewModel9, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
-        self.da_head = DANetHead(2048)
-        self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
-        self.conv3x3_ocr = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
-                                         norm_layer(512),
-                                         nn.ReLU(inplace=True)
-                                         )
-        self.ocr_gather_head = SpatialGather_Module(3)
-        self.ocr_distri_head = SpatialOCR_Module(in_channels=512,
-                                                 key_channels=256,
-                                                 out_channels=512,
-                                                 scale=1,
-                                                 dropout=0.05,
-                                                 )
-        self.aux_head = nn.Sequential(nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0),
-                                      norm_layer(512),
-                                      nn.ReLU(inplace=True),
-                                      nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
-                                      )
-        self.cls_head = nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
-        self.rend_head = PointHead(in_c=515, num_classes=nclass)
-
-    def forward(self, x):
-        _, _, _, c4 = self.base_forward(x)
-        feats = self.aspp(self.da_head(c4))
-        out_aux = self.aux_head(feats)
-        feats = self.conv3x3_ocr(feats)
-        context = self.ocr_gather_head(feats, out_aux)
-        feats = self.ocr_distri_head(feats, context)
-        out = self.cls_head(feats)
-        final = self.rend_head(x, feats, out)
-
-        return F.interpolate(out_aux, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), \
-               F.interpolate(out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), \
-               final
+        c1, c2, c3, c4 = self.base_forward(x)
+        mask = self.seg(self.da_head(c4))
+        final = self.rend_head(c1, c2, c3, out)
+        return F.interpolate(mask, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), final
 
 
 class MLP(nn.Module):
@@ -885,11 +799,48 @@ class RendNet(nn.Module):
         }
 
 
-# using multi-stage rendering
-class NewModel10(BaseNet):
+# base + PEM + SEM
+class BasePEMSEM(BaseNet):
 
     def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
-        super(NewModel10, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
+        super(BasePEMSEM, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
+        self.da_head = DANetHead(2048)
+        self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
+        self.conv3x3_ocr = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+                                         norm_layer(512),
+                                         nn.ReLU(inplace=True)
+                                         )
+        self.ocr_gather_head = SpatialGather_Module(3)
+        self.ocr_distri_head = SpatialOCR_Module(in_channels=512,
+                                                 key_channels=256,
+                                                 out_channels=512,
+                                                 scale=1,
+                                                 dropout=0.05,
+                                                 )
+        self.aux_head = nn.Sequential(nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0),
+                                      norm_layer(512),
+                                      nn.ReLU(inplace=True),
+                                      nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+                                      )
+        self.cls_head = nn.Conv2d(512, nclass, kernel_size=1, stride=1, padding=0, bias=True)
+
+    def forward(self, x):
+        _, _, _, c4 = self.base_forward(x)
+        feats = self.aspp(self.da_head(c4))
+        out_aux = self.aux_head(feats)
+        context = self.ocr_gather_head(feats, out_aux)
+        feats = self.ocr_distri_head(feats, context)
+        out = self.cls_head(feats)
+
+        return F.interpolate(out_aux, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS), F.interpolate(
+            out, size=x.size()[-2:], mode='bilinear', align_corners=ALIGN_CORNERS)
+
+
+# # base + PEM + SEM + BEM
+class NPCNet(BaseNet):
+
+    def __init__(self, nclass, backbone, norm_layer=nn.BatchNorm2d, pretrained=False):
+        super(NPCNet, self).__init__(nclass, backbone, norm_layer=norm_layer, pretrained=pretrained)
         self.da_head = DANetHead(2048)
         self.aspp = ASPPBlock(in_channel=2048, out_channel=512, norm_layer=norm_layer, os=8)
         self.conv3x3_ocr = nn.Sequential(nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
@@ -927,7 +878,7 @@ class NewModel10(BaseNet):
 
 
 if __name__ == "__main__":
-    net = NewModel10(backbone='resnet101', nclass=3, pretrained=False)
+    net = NPCNet(backbone='resnet101', nclass=3, pretrained=False)
     img = torch.rand(2, 3, 512, 512)
     mask = torch.rand(2, 3, 512, 512)
     net.train()
