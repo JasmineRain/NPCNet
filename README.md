@@ -1,2 +1,2 @@
-# NPC_Segmentation_Classification
-The official implementation of work xxx
+# NPCNet
+The official implementation of work entitled "NPCNet: Jointly Segment Primary Nasopharyngeal Carcinoma Tumor and Metastatic Lymph Nodes in MR Images", accepted by IEEE Transactions on Medical Imaging.
