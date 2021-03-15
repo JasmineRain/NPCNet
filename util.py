@@ -99,9 +99,10 @@ def semantic_to_mask(mask, labels):
 
 if __name__ == "__main__":
 
-    pred = np.array([0, 0, 0, 1, 1, 2, 2, 1, 0, 2, 3, 2])
-    label = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3])
-    cm = get_confusion_matrix(label, pred, labels=[0, 1, 2, 3])
-    print(get_classification_report(cm))
+    pred = np.array([0, 1, 0, 0, 0, 1, 1, 1, 1, 1])
+    label = np.array([0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
+    cm = get_confusion_matrix(label, pred, labels=[0, 1])
+    # print(get_classification_report(cm))
+    print(classification_report(label, pred, output_dict=True))
 
 
