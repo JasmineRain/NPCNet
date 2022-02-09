@@ -2,7 +2,7 @@
 The official implementation of work entitled "NPCNet: Jointly Segment Primary Nasopharyngeal Carcinoma Tumor and Metastatic Lymph Nodes in MR Images", accepted by IEEE Transactions on Medical Imaging, 2022. The paper is now under publishing and now available at [IEEE Early Access](https://ieeexplore.ieee.org/document/9684475)
 
 # Method
-![Model Architecture](https://github.com/JasmineRain/NPCNet/doc/arc.png)
+![Model Architecture](https://github.com/JasmineRain/NPCNet/arc.png)
 
 # Training
 
