@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import Module, Conv2d, Parameter, Softmax
-from resnest.torch import resnest50, resnest101
 
 import dilated as resnet
 from torchvision import models
