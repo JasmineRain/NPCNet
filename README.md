@@ -1,6 +1,15 @@
 # NPCNet
 The official implementation of work entitled "NPCNet: Jointly Segment Primary Nasopharyngeal Carcinoma Tumor and Metastatic Lymph Nodes in MR Images", accepted by IEEE Transactions on Medical Imaging, 2022. The paper is now under publishing and now available at [IEEE Early Access](https://ieeexplore.ieee.org/document/9684475)
 
+# Notice
+How to train the model stably? While doing ablation study, we found that training the model with BEM from scratch is unstable, which
+means that the performance of the BEM depends on the low-resolution segmentation results. The way we train the model:
+1. Train the base model with PEM and SEM, you need to modify the model code to remove the BEM, and remove the "point_loss" in "train_npcnet.py" while calculating loss. Save the best model (calculate the seg metrics utilizing fine mask).
+2. Modify the model code by adding BEM in model code and adding point_loss in training code, load the weights from step 1.
+3. Train the whole model. The learning rate of the parameters in base model, PEM and SEM is 1/10 of those in BEM (You will find the optimizer lr settings and loss function settings in the codes).
+4. The trained model weights on our datasets will be uploaded soon.
+5. The datasets used in this paper will be made public available by the hospital mentioned in our paper. Please contact with the corresponding authors.
+
 # Method
 ![Model Architecture](https://github.com/JasmineRain/NPCNet/blob/master/arc.png)
 
@@ -38,9 +47,8 @@ Leave your question in the issue of this repo. We would answer your question ASA
   journal={IEEE Transactions on Medical Imaging},
   title={NPCNet: Jointly Segment Primary Nasopharyngeal Carcinoma Tumors and Metastatic Lymph Nodes in MR Images},
   year={2022},
-  volume={},
-  number={},
-  pages={1-1},
+  volume={41},
+  pages={1639-1650},
   doi={10.1109/TMI.2022.3144274}
 }
 ```
