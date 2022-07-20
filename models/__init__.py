@@ -8,5 +8,5 @@ from .RendUNet import *
 from .SEDANet import *
 from .scSEUNet import *
 from .AUNet import *
-from .NewModel import *
+from .NPCNet import *
 from .RANet import *
