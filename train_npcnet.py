@@ -4,7 +4,7 @@ import os
 from util import semantic_to_mask, mask_to_semantic, get_confusion_matrix, get_miou, get_classification_report
 import torch.nn.functional as F
 from models.RendPoint import sampling_features
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2, 3'
 import torch
 import torch.nn as nn
 from torch.optim import SGD, lr_scheduler, adamw
@@ -68,16 +68,15 @@ def train_val(config):
         # optimizer = SGD(model.parameters(), lr=config.lr, weight_decay=1e-4, momentum=0.9)
         optimizer1 = torch.optim.SGD([
             {'params': filter(lambda p: p.requires_grad, model.backbone.parameters()), 'lr': 1e-3},
-            {'params': filter(lambda p: p.requires_grad, model.seg.parameters()), 'lr': 1e-3},
-            # {'params': filter(lambda p: p.requires_grad, model.da_head.parameters()), 'lr': 1e-3},
-            # {'params': filter(lambda p: p.requires_grad, model.aspp.parameters()), 'lr': 1e-3},
-            # {'params': filter(lambda p: p.requires_grad, model.conv3x3_ocr.parameters()), 'lr': 1e-3},
-            # {'params': filter(lambda p: p.requires_grad, model.ocr_gather_head.parameters()), 'lr': 1e-3},
-            # {'params': filter(lambda p: p.requires_grad, model.ocr_distri_head.parameters()), 'lr': 1e-3},
-            # {'params': filter(lambda p: p.requires_grad, model.aux_head.parameters()), 'lr': 1e-3},
-            # {'params': filter(lambda p: p.requires_grad, model.cls_head.parameters()), 'lr': 1e-3},
+            {'params': filter(lambda p: p.requires_grad, model.da_head.parameters()), 'lr': 1e-3},
+            {'params': filter(lambda p: p.requires_grad, model.aspp.parameters()), 'lr': 1e-3},
+            {'params': filter(lambda p: p.requires_grad, model.conv3x3_ocr.parameters()), 'lr': 1e-3},
+            {'params': filter(lambda p: p.requires_grad, model.ocr_gather_head.parameters()), 'lr': 1e-3},
+            {'params': filter(lambda p: p.requires_grad, model.ocr_distri_head.parameters()), 'lr': 1e-3},
+            {'params': filter(lambda p: p.requires_grad, model.aux_head.parameters()), 'lr': 1e-3},
+            {'params': filter(lambda p: p.requires_grad, model.cls_head.parameters()), 'lr': 1e-3},
         ],
-            lr=config.lr, momentum=0.9, weight_decay=1e-4
+            lr=config.lr * 0.1, momentum=0.9, weight_decay=1e-4
         )
         optimizer2 = torch.optim.SGD(model.rend_head.parameters(), lr=config.lr, momentum=0.9, weight_decay=1e-4)
     elif config.optimizer == "adamw":
@@ -114,14 +113,11 @@ def train_val(config):
             for image, mask in train_loader:
                 image = image.to(device, dtype=torch.float32)
                 mask = mask.to(device, dtype=torch.float32)
-                # aux_out, out, items = model(image)
-                out, items = model(image)
+                aux_out, out, items = model(image)
+                # out, items = model(image)
                 if not config.multi_stage:
                     gt_points = sampling_features(mask, items['points'], mode='nearest', align_corners=ALIGN_CORNERS).argmax(dim=1)
                     rend = items['rend']
-                    # print("\n")
-                    # print((gt_points==0).sum(), (gt_points==1).sum(), (gt_points==2).sum())
-                    # print((rend == 0).sum(), (rend == 1).sum(), (rend == 2).sum())
                     point_loss = F.cross_entropy(rend, gt_points)
                 else:
                     stage3, stage4, stage5 = items.values()
@@ -137,11 +133,11 @@ def train_val(config):
                     point_loss = point_loss3 + point_loss4 + point_loss5
 
                 mask = mask.long().argmax(dim=1)
-                # aux_loss = criterion(aux_out, mask)
+                aux_loss = criterion(aux_out, mask)
                 seg_loss = criterion(out, mask)
 
-                # loss = aux_loss + seg_loss + point_loss
-                loss = point_loss + seg_loss
+                loss = aux_loss + seg_loss + point_loss
+                # loss = point_loss + seg_loss
 
                 epoch_loss += loss.item()
 
@@ -179,8 +175,8 @@ def train_val(config):
                     target = mask.to(device, dtype=torch.long).argmax(dim=1)
                     mask = mask.cpu().numpy()
 
-                    # aux_pred, pred, final = model(image)
-                    pred, final = model(image)
+                    aux_pred, pred, final = model(image)
+                    # pred, final = model(image)
                     final = final['fine']
                     val_loss += F.cross_entropy(final, target).item()
                     final = final.cpu().detach().numpy()
